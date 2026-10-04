@@ -1,0 +1,1269 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>HALODIAL 系统蓝图</title>
+<meta name="description" content="HALODIAL 最后 production 架构说明：Kelly 慈善外呼语音 AI 的完整运作方式。">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a switchboard ledger. Sticky section index on the left (desktop), long single reading column on the right; diagrams break out to full column width. */
+:root{
+  --paper:#F2F4F1;      /* green-grey ground, biased toward the jade accent */
+  --panel:#FBFCFA;
+  --ink:#14201C;
+  --muted:#56645E;
+  --line:#D3DBD6;
+  --jade:#0B7A63;       /* "line connected" signal colour */
+  --jade-soft:#DDEFE8;
+  --ring:#A35A12;       /* Kelly's voice / audio cues */
+  --ring-soft:#F6E8D8;
+  --ok:#1E7A3B; --ok-soft:#E1F1E5;
+  --warn:#9A5B00; --warn-soft:#F7ECD5;
+  --bad:#B42318; --bad-soft:#F8E1DE;
+  --unk:#5F55A0; --unk-soft:#E8E6F5;
+  --hist:#5E6A65; --hist-soft:#E6EAE8;
+  --display:"Noto Serif SC","Songti SC","STSong",serif;
+  --body:"Noto Sans SC","PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --s-1:12.5px; --s0:15.5px; --s1:18px; --s2:22px; --s3:30px; --s4:44px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#0E1412; --panel:#151E1B; --ink:#E4ECE8; --muted:#9AABA4; --line:#2A3833;
+    --jade:#3CC4A0; --jade-soft:#123A30; --ring:#E3A35E; --ring-soft:#3A2814;
+    --ok:#5BC97A; --ok-soft:#163222; --warn:#E0A84A; --warn-soft:#382A10; --bad:#F07A6E; --bad-soft:#3D1B17;
+    --unk:#A99DF0; --unk-soft:#262142; --hist:#A3B0AA; --hist-soft:#222C29;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#0E1412; --panel:#151E1B; --ink:#E4ECE8; --muted:#9AABA4; --line:#2A3833;
+  --jade:#3CC4A0; --jade-soft:#123A30; --ring:#E3A35E; --ring-soft:#3A2814;
+  --ok:#5BC97A; --ok-soft:#163222; --warn:#E0A84A; --warn-soft:#382A10; --bad:#F07A6E; --bad-soft:#3D1B17;
+  --unk:#A99DF0; --unk-soft:#262142; --hist:#A3B0AA; --hist-soft:#222C29;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:var(--s0);line-height:1.75;padding-inline:16px;padding-block:0 64px}
+a{color:var(--jade)}
+:focus-visible{outline:2px solid var(--jade);outline-offset:2px;border-radius:4px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.3;margin:0}
+h2{font-size:var(--s3);font-weight:900}
+h3{font-size:var(--s1);font-weight:700;font-family:var(--body)}
+p{margin:0;max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.86em}
+code{background:var(--hist-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.shell{max-width:1240px;margin-inline:auto;display:grid;grid-template-columns:minmax(0,1fr);gap:40px}
+@media (min-width:1100px){.shell{grid-template-columns:230px minmax(0,1fr)}}
+
+/* index rail */
+.rail{display:none}
+@media (min-width:1100px){
+  .rail{display:block;position:sticky;top:env(safe-area-inset-top,0px);align-self:start;max-height:100vh;overflow-y:auto;padding-block:28px}
+}
+.rail ol,.toc-m ol{list-style:none;margin:0;padding:0;display:grid;gap:1px}
+.rail a,.toc-m a{display:grid;grid-template-columns:28px 1fr;gap:6px;text-decoration:none;color:var(--muted);font-size:13px;padding:3px 8px;border-radius:6px;line-height:1.45}
+.rail a span:first-child,.toc-m a span:first-child{font-family:var(--mono);font-size:11.5px;padding-top:2px;font-variant-numeric:tabular-nums}
+.rail a:hover,.toc-m a:hover{color:var(--ink);background:var(--hist-soft)}
+.rail a.on{color:var(--jade);background:var(--jade-soft);font-weight:500}
+.brandmark{font-family:var(--mono);font-weight:600;letter-spacing:.18em;font-size:13px;color:var(--ink);margin:0 0 14px 8px}
+.toc-m{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:6px 10px}
+.toc-m summary{cursor:pointer;font-weight:500;padding:6px 0}
+@media (min-width:1100px){.toc-m{display:none}}
+
+main{min-width:0;display:grid;gap:72px;padding-block:28px 0}
+
+/* hero */
+.hero{display:grid;gap:22px;padding-block:24px 8px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.hero h1{font-size:clamp(34px,6vw,var(--s4));font-weight:900;letter-spacing:.01em}
+.hero h1 b{color:var(--jade);font-weight:900}
+.hero .lede{font-size:var(--s1);color:var(--ink);max-width:40em}
+.siptape{display:flex;flex-wrap:wrap;gap:0;font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:10px;overflow:hidden;width:fit-content;max-width:100%;background:var(--panel)}
+.siptape span{padding:8px 12px;flex:0 0 auto;border-right:1px solid var(--line);white-space:nowrap}
+.siptape span:last-child{border-right:0}
+.siptape .hot{background:var(--jade);color:var(--paper);font-weight:600}
+.offline{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:10px;background:var(--warn-soft);color:var(--ink);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);max-width:58em}
+.offline strong{color:var(--warn)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--warn);flex:none;margin-top:8px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button,.btn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:7px 14px;border-radius:8px;cursor:pointer}
+button:hover{border-color:var(--jade)}
+button.primary{background:var(--jade);border-color:var(--jade);color:var(--paper);font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+
+/* tags */
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;line-height:1;padding:4px 7px;border-radius:999px;font-weight:500;white-space:nowrap;vertical-align:middle;border:1px solid transparent}
+.tag.v{background:var(--ok-soft);color:var(--ok)}
+.tag.code{background:var(--jade-soft);color:var(--jade)}
+.tag.cfg{background:var(--jade-soft);color:var(--jade);border-color:color-mix(in srgb,var(--jade) 40%,transparent)}
+.tag.test{background:var(--ok-soft);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.tag.unk{background:var(--unk-soft);color:var(--unk)}
+.tag.hist{background:var(--hist-soft);color:var(--hist)}
+.tag.off{background:var(--warn-soft);color:var(--warn)}
+.tag.adj{background:var(--ring-soft);color:var(--ring)}
+.tag.impl{background:var(--ok-soft);color:var(--ok)}
+.tag.part{background:var(--warn-soft);color:var(--warn)}
+.tag.none{background:var(--bad-soft);color:var(--bad)}
+.tag.eval{background:var(--hist-soft);color:var(--hist);border-color:var(--line)}
+.tags{display:flex;flex-wrap:wrap;gap:5px}
+
+/* sections */
+section{display:grid;gap:22px;min-width:0}
+.sec-head{display:grid;gap:8px;border-top:2px solid var(--ink);padding-top:14px}
+.sec-no{font-family:var(--mono);font-size:12.5px;color:var(--jade);letter-spacing:.08em}
+.sec-head p{color:var(--muted)}
+.cols{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:8px;align-content:start}
+.box h3{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;overflow-wrap:anywhere}
+.say{border-left:3px solid var(--ring);padding:4px 0 4px 12px;color:var(--ink);font-size:14.5px}
+.say b{color:var(--ring);font-weight:500;margin-right:6px}
+.note{font-size:13.5px;color:var(--muted)}
+ul.clean{margin:0;padding-left:1.2em;display:grid;gap:4px;max-width:70ch}
+details.tech{border:1px dashed var(--line);border-radius:10px;padding:2px 14px;background:transparent}
+details.tech[open]{background:var(--panel);padding-bottom:12px}
+details.tech summary{cursor:pointer;font-size:13.5px;color:var(--jade);font-weight:500;padding:8px 0;list-style-position:outside}
+details.tech > div{display:grid;gap:8px;font-size:14px}
+
+/* flows (linear diagrams) */
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;row-gap:10px;counter-reset:f}
+.flow > div{flex:1 1 96px;min-width:92px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.5;position:relative;margin-right:22px}
+.flow > div:last-child{margin-right:0}
+.flow > div::after{content:"";position:absolute;right:-17px;top:50%;width:12px;height:12px;border-top:2px solid var(--muted);border-right:2px solid var(--muted);transform:translateY(-50%) rotate(45deg)}
+.flow > div:last-child::after{display:none}
+.flow b{display:block;font-size:14px}
+.flow small{color:var(--muted);font-size:12px}
+.flow .hl{border-color:var(--jade);background:var(--jade-soft)}
+.flow .rg{border-color:var(--ring);background:var(--ring-soft)}
+@media (max-width:640px){
+  .flow{flex-direction:column}
+  .flow > div{flex:0 0 auto;min-width:0;margin-right:0;margin-bottom:16px}
+  .flow > div::after{right:auto;left:50%;top:auto;bottom:-15px;transform:translateX(-50%) rotate(135deg)}
+}
+
+/* figures */
+figure{margin:0;display:grid;gap:10px}
+figcaption{font-size:13.5px;color:var(--muted);max-width:72ch}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px}
+svg.dg{display:block;width:100%;min-width:720px;height:auto;color:var(--muted);font-family:var(--body)}
+svg .n{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+svg .na{fill:var(--jade-soft);stroke:var(--jade);stroke-width:1.5}
+svg .nr{fill:var(--ring-soft);stroke:var(--ring);stroke-width:1.5}
+svg .nx{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.2}
+svg .nu{fill:var(--unk-soft);stroke:var(--unk);stroke-width:1.2}
+svg .nd{fill:var(--panel);stroke:var(--muted);stroke-width:1.2;stroke-dasharray:5 4}
+svg .t{fill:var(--ink);font-size:13.5px;font-weight:500}
+svg .tm{fill:var(--ink);font-size:12px;font-family:var(--mono)}
+svg .ts{fill:var(--muted);font-size:11.5px}
+svg .tj{fill:var(--jade);font-size:11.5px;font-weight:500}
+svg .tr{fill:var(--ring);font-size:11.5px;font-weight:500}
+svg .e{stroke:var(--muted);stroke-width:1.5;fill:none}
+svg .ej{stroke:var(--jade);stroke-width:2;fill:none}
+svg .ed{stroke:var(--muted);stroke-width:1.3;fill:none;stroke-dasharray:5 4}
+svg .lane{fill:var(--hist-soft)}
+svg .barK{fill:var(--ring)}
+svg .barC{fill:var(--jade)}
+svg .ghost{fill:none;stroke:var(--ring);stroke-dasharray:4 3;stroke-width:1.3}
+svg .st{cursor:pointer}
+svg .st:focus{outline:none}
+svg .st:focus .stb,svg .st.on .stb{stroke-width:3}
+
+/* call journey */
+.journey{display:grid;gap:16px;grid-template-columns:1fr}
+@media (min-width:860px){.journey{grid-template-columns:300px minmax(0,1fr)}}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:640px;overflow-y:auto;padding-right:4px}
+.steps button{width:100%;text-align:left;display:grid;grid-template-columns:30px 1fr;gap:8px;align-items:start;border-radius:8px;padding:7px 10px;font-size:14px;line-height:1.45}
+.steps button .k{font-family:var(--mono);font-size:11.5px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}
+.steps button[aria-selected="true"]{background:var(--jade-soft);border-color:var(--jade)}
+.steps .grp{font-size:11.5px;letter-spacing:.12em;color:var(--muted);padding:10px 4px 2px;font-family:var(--mono)}
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;display:grid;gap:14px;align-content:start;position:sticky;top:12px}
+.detail h3{font-size:var(--s2);font-family:var(--display)}
+.tri{display:grid;gap:12px}
+.tri > div{display:grid;grid-template-columns:62px 1fr;gap:10px;align-items:start}
+.tri .lb{font-size:12px;font-weight:700;padding:3px 0;text-align:center;border-radius:6px}
+.lb.h{background:var(--ring-soft);color:var(--ring)}
+.lb.t{background:var(--jade-soft);color:var(--jade)}
+.lb.w{background:var(--hist-soft);color:var(--hist)}
+.navpair{display:flex;gap:8px;justify-content:space-between}
+
+/* pipeline stage table */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:760px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font-size:12px;letter-spacing:.06em;color:var(--muted);font-weight:500;background:var(--hist-soft);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+td b{font-weight:600}
+.num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+
+/* cards */
+.cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:8px;align-content:start}
+.card h3{font-size:16px;display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.card dl{margin:0;display:grid;gap:6px;font-size:13.5px}
+.card dt{color:var(--muted);font-size:12px}
+.card dd{margin:0}
+.sev{font-family:var(--mono);font-size:11px;padding:3px 6px;border-radius:4px;white-space:nowrap}
+.sev.H{background:var(--bad-soft);color:var(--bad)}
+.sev.M{background:var(--warn-soft);color:var(--warn)}
+.sev.L{background:var(--hist-soft);color:var(--hist)}
+
+/* latency chart */
+.bars{display:grid;gap:12px}
+.bar{display:grid;grid-template-columns:minmax(120px,190px) 1fr;gap:12px;align-items:center;font-size:13.5px}
+.track{position:relative;height:26px;background:var(--hist-soft);border-radius:6px}
+.track i{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--jade)}
+.track i.p90{background:color-mix(in srgb,var(--jade) 30%,transparent)}
+.track i.hist{background:var(--hist)}
+.track i.histp{background:color-mix(in srgb,var(--hist) 30%,transparent)}
+.track em{position:absolute;left:8px;top:3px;font-style:normal;font-family:var(--mono);font-size:12px;color:var(--paper);font-weight:600;white-space:nowrap}
+.track em.out{color:var(--ink)}
+.axis{display:grid;grid-template-columns:minmax(120px,190px) 1fr;gap:12px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.axis div{display:flex;justify-content:space-between}
+
+/* state machine detail */
+.stinfo{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-height:76px}
+
+/* infra frame */
+.host{border:2px dashed var(--muted);border-radius:14px;padding:16px;display:grid;gap:12px;background:transparent}
+.host > .lbl{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.ctrs{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.ctr{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px;display:grid;gap:4px}
+.ctr b{font-family:var(--mono);font-size:13px}
+.ctr.pub{border-color:var(--jade)}
+.ext{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.ext div{border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;background:var(--hist-soft)}
+
+/* review form */
+.review{display:grid;gap:14px}
+.rv-item{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;display:grid;gap:8px}
+.rv-item label{display:flex;gap:10px;align-items:center;font-weight:500;cursor:pointer}
+.rv-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--jade)}
+textarea,input[type=text]{font:inherit;font-size:14px;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--paper);color:var(--ink)}
+textarea{min-height:70px;resize:vertical}
+.rv-out textarea{min-height:220px;font-family:var(--mono);font-size:13px}
+.toast{font-size:13px;color:var(--ok)}
+footer{border-top:1px solid var(--line);padding-top:18px;color:var(--muted);font-size:13px;display:grid;gap:6px}
+</style>
+
+<div class="shell">
+<nav class="rail" aria-label="章节目录">
+  <p class="brandmark">HALODIAL</p>
+  <ol id="rail"></ol>
+</nav>
+
+<main id="top">
+<header class="hero">
+  <div class="eyebrow">System Blueprint · Last production architecture</div>
+  <h1>HALODIAL 系统蓝图<br><b>Kelly</b> 一通电话背后的全部机制</h1>
+  <p class="lede">这份文件把 HALODIAL 最后一个 production 版本（慈善外呼 Kelly）从电话打出去、AI 听懂、AI 回答，到后台记录结果，完整拆开来讲。每一段都分「人话」和「技术」两层，所有内容都对照过源码。</p>
+  <div class="siptape" aria-label="一次成功外呼的 SIP 信号顺序">
+    <span>DISPATCH</span><span>CLAIM</span><span>DIALING</span><span>INVITE</span><span>180 Ringing ≤ 20s</span><span class="hot">200 OK · ANSWERED</span><span>heartbeat / 15s</span><span>DELETE ROOM</span>
+  </div>
+  <div class="offline" role="note"><span class="dot" aria-hidden="true"></span><p><strong>目前下线：</strong>最后的 production 服务器已经关掉（节省成本）。本页描述的是「最后一次部署的架构」，依据是保存下来的 production 源码，不代表系统现在在线运行。</p></div>
+  <div class="toolbar">
+    <button type="button" id="toggleTech" aria-pressed="false">展开全部技术细节</button>
+    <div class="legend" aria-label="标签说明">
+      <span class="tag v">已验证</span><span class="tag code">代码确认</span><span class="tag cfg">配置确认</span><span class="tag test">测试确认</span><span class="tag unk">未确认</span><span class="tag hist">历史配置</span><span class="tag off">目前下线</span><span class="tag adj">可调整</span>
+    </div>
+  </div>
+  <details class="toc-m"><summary>章节目录</summary><ol id="tocm"></ol></details>
+</header>
+
+<!-- 01 -->
+<section id="s01" data-title="HALODIAL 概览">
+  <div class="sec-head"><span class="sec-no">01</span><h2>HALODIAL 到底是什么？</h2></div>
+  <p>HALODIAL 是一个会自己打电话的 AI 系统。后台放好要联系的人，系统就会一通一通打出去。客户接了之后，由 AI 角色「Kelly」用马来西亚华语跟客户自然聊天：介绍中心、回答问题、客户愿意的话留个 WhatsApp，之后由真人同事跟进。整通电话的结果、对话内容、跟进需求都会回到后台，让工作人员查看。</p>
+  <p>最后一个 production 版本是为 Penang 一间残障照护中心做的慈善外呼，AI 角色叫 Kelly。Kelly 不收钱、不处理捐款，只负责介绍和留联系方式。</p>
+  <div class="flow" aria-label="HALODIAL 一通电话的简单流程">
+    <div><b>打出电话</b><small>系统自动拨号</small></div>
+    <div><b>听懂客户</b><small>判断讲完 + 听写</small></div>
+    <div class="hl"><b>AI 思考</b><small>按批准资料回答</small></div>
+    <div class="rg"><b>Kelly 回答</b><small>合成 Kelly 的声音</small></div>
+    <div><b>继续对话</b><small>可插话、可打断</small></div>
+    <div><b>记录结果</b><small>对话、跟进、勿扰</small></div>
+    <div><b>后台查看</b><small>公司管理员</small></div>
+  </div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1000 450" role="img" aria-label="HALODIAL 总体架构：电话经 SIP 进入 LiveKit，由 Kelly Voice Worker 处理并调用 Groq、OpenAI、Fish Audio；后台由 Caddy、Admin、Backend、PostgreSQL 和 Dispatcher 组成。">
+      <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <rect class="n" x="20" y="40" width="140" height="64" rx="10"/><text class="t" x="90" y="68" text-anchor="middle">客户手机</text><text class="ts" x="90" y="88" text-anchor="middle">普通电话</text>
+      <rect class="n" x="200" y="40" width="140" height="64" rx="10"/><text class="t" x="270" y="68" text-anchor="middle">SIP 线路商</text><text class="ts" x="270" y="88" text-anchor="middle">电话网关（未确认）</text>
+      <rect class="n" x="380" y="40" width="180" height="64" rx="10"/><text class="t" x="470" y="68" text-anchor="middle">LiveKit</text><text class="ts" x="470" y="88" text-anchor="middle">SIP · 媒体房间 · 派工</text>
+      <rect class="na" x="600" y="40" width="200" height="64" rx="10"/><text class="t" x="700" y="68" text-anchor="middle">Kelly Voice Worker</text><text class="ts" x="700" y="88" text-anchor="middle">VAD · STT · LLM · TTS</text>
+      <rect class="n" x="840" y="14" width="146" height="40" rx="8"/><text class="t" x="913" y="39" text-anchor="middle">Groq · 听写</text>
+      <rect class="n" x="840" y="62" width="146" height="40" rx="8"/><text class="t" x="913" y="87" text-anchor="middle">OpenAI · 思考</text>
+      <rect class="nr" x="840" y="110" width="146" height="40" rx="8"/><text class="t" x="913" y="135" text-anchor="middle">Fish Audio · 声音</text>
+      <line class="e" x1="160" y1="72" x2="198" y2="72" marker-end="url(#ar1)" marker-start="url(#ar1)"/>
+      <line class="e" x1="340" y1="72" x2="378" y2="72" marker-end="url(#ar1)" marker-start="url(#ar1)"/>
+      <line class="ej" x1="560" y1="72" x2="598" y2="72" marker-end="url(#ar1)" marker-start="url(#ar1)"/>
+      <text class="ts" x="355" y="62" text-anchor="middle">SIP</text><text class="tj" x="579" y="62" text-anchor="middle">音频</text>
+      <line class="e" x1="800" y1="60" x2="838" y2="36" marker-end="url(#ar1)"/>
+      <line class="e" x1="800" y1="76" x2="838" y2="82" marker-end="url(#ar1)"/>
+      <line class="e" x1="800" y1="92" x2="838" y2="128" marker-end="url(#ar1)"/>
+      <rect class="n" x="200" y="230" width="140" height="56" rx="10"/><text class="t" x="270" y="254" text-anchor="middle">Admin 后台</text><text class="ts" x="270" y="273" text-anchor="middle">Next.js</text>
+      <rect class="n" x="380" y="230" width="180" height="56" rx="10"/><text class="t" x="470" y="254" text-anchor="middle">Dispatcher 派工器</text><text class="ts" x="470" y="273" text-anchor="middle">每秒检查一次</text>
+      <rect class="n" x="20" y="330" width="140" height="56" rx="10"/><text class="t" x="90" y="354" text-anchor="middle">工作人员浏览器</text><text class="ts" x="90" y="373" text-anchor="middle">HTTPS</text>
+      <rect class="n" x="200" y="330" width="140" height="56" rx="10"/><text class="t" x="270" y="354" text-anchor="middle">Caddy</text><text class="ts" x="270" y="373" text-anchor="middle">HTTPS 反向代理</text>
+      <rect class="n" x="380" y="330" width="180" height="56" rx="10"/><text class="t" x="470" y="354" text-anchor="middle">PostgreSQL 15</text><text class="ts" x="470" y="373" text-anchor="middle">所有业务资料</text>
+      <rect class="n" x="600" y="330" width="200" height="56" rx="10"/><text class="t" x="700" y="354" text-anchor="middle">Backend API</text><text class="ts" x="700" y="373" text-anchor="middle">Fastify · TypeScript</text>
+      <line class="e" x1="470" y1="230" x2="470" y2="106" marker-end="url(#ar1)"/><text class="ts" x="478" y="170">请 LiveKit 派工</text>
+      <line class="e" x1="470" y1="288" x2="470" y2="328" marker-end="url(#ar1)" marker-start="url(#ar1)"/><text class="ts" x="478" y="312">SQL</text>
+      <line class="e" x1="562" y1="358" x2="598" y2="358" marker-end="url(#ar1)" marker-start="url(#ar1)"/>
+      <line class="ej" x1="700" y1="106" x2="700" y2="328" marker-end="url(#ar1)" marker-start="url(#ar1)"/><text class="tj" x="710" y="210">领取任务 · 事件 · 心跳</text><text class="ts" x="710" y="228">（内部接口，外网屏蔽）</text>
+      <line class="e" x1="160" y1="358" x2="198" y2="358" marker-end="url(#ar1)"/>
+      <line class="e" x1="270" y1="330" x2="270" y2="288" marker-end="url(#ar1)"/><text class="ts" x="278" y="314">页面</text>
+      <polyline class="e" points="270,386 270,420 700,420 700,388" marker-end="url(#ar1)"/><text class="ts" x="480" y="413" text-anchor="middle">/api 请求</text>
+    </svg>
+    </div>
+    <figcaption>图 1 · 总体架构。上排是「电话那一边」：电话 → SIP → LiveKit → Kelly worker，worker 再调用三家 AI 服务。下排是「后台那一边」：工作人员通过 Caddy 进入后台，Dispatcher 从数据库挑联系人、请 LiveKit 派工，worker 把通话进度写回 Backend。</figcaption>
+  </figure>
+  <div class="tags"><span class="tag code">代码确认</span><span class="tag cfg">配置确认：docker-compose</span><span class="tag off">目前下线</span><span class="tag unk">SIP 线路商名称未在 production 源码中确认</span></div>
+</section>
+
+<!-- 02 -->
+<section id="s02" data-title="一通电话怎么跑">
+  <div class="sec-head"><span class="sec-no">02</span><h2>一通电话到底怎么跑？</h2><p>点左边任何一个阶段，右边会显示：人话、技术、为什么。顺序按源码真正执行的顺序排列。</p></div>
+  <div class="journey">
+    <ol class="steps" id="steps" role="tablist" aria-label="通话阶段"></ol>
+    <div class="detail" id="stepDetail" role="tabpanel" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- 03 -->
+<section id="s03" data-title="AI Voice Pipeline">
+  <div class="sec-head"><span class="sec-no">03</span><h2>AI Voice Pipeline：声音进来、声音出去</h2><p>客户的每一句话都会走一遍下面这条线。中间两道「关卡」负责挡掉听错的字和不该讲的话。</p></div>
+  <div class="flow" aria-label="语音处理流水线">
+    <div><b>电话音频</b><small>客户的声音</small></div>
+    <div><b>LiveKit</b><small>实时音频进房间</small></div>
+    <div><b>VAD</b><small>Silero · 讲完没</small></div>
+    <div><b>STT</b><small>Groq Whisper</small></div>
+    <div class="hl"><b>听写关卡</b><small>挡幻听、去重复</small></div>
+    <div class="hl"><b>LLM</b><small>GPT-5.4-mini</small></div>
+    <div class="hl"><b>回复关卡</b><small>事实/动作检查</small></div>
+    <div class="rg"><b>TTS</b><small>Fish Audio</small></div>
+    <div><b>LiveKit</b><small>播回电话</small></div>
+    <div><b>客户听到</b><small>Kelly 的声音</small></div>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>阶段</th><th>Provider / 模型</th><th>用途</th><th>重要设定</th><th>备用方案</th><th>已知限制</th><th>延迟影响</th></tr></thead>
+    <tbody>
+      <tr><td><b>媒体</b><br><span class="tag code">代码确认</span></td><td>LiveKit Agents 1.6.10（Python SDK livekit 1.1.14）</td><td>SIP 外呼、音频房间、把工作派给 worker</td><td>每通电话一个房间 <code>kelly-prod-…</code>；客户参与者固定叫 <code>customer</code></td><td>无</td><td>LiveKit 用 Cloud 还是自建：<span class="tag unk">未确认</span></td><td>网络/媒体延迟未测量</td></tr>
+      <tr><td><b>VAD</b><br><span class="tag code">代码确认</span></td><td>Silero VAD（livekit-plugins-silero 1.6.10）+ LiveKit 端点判断模型</td><td>判断客户开始讲、讲完</td><td>SDK 预设：门槛 0.5、最短静音 0.55 秒、前置缓冲 0.5 秒；端点等待 0.2–0.8 秒</td><td>端点模型自带本地后备（SDK 预设）</td><td>噪音可能被当成讲话</td><td>每句至少多等「静音判断 + 端点等待」</td></tr>
+      <tr><td><b>STT</b><br><span class="tag code">代码确认</span></td><td>Groq · <code>whisper-large-v3</code>（直连 Groq API）</td><td>把客户的话变成文字</td><td>语言固定 <code>zh</code>，不自动侦测；逐字转录提示词 + 地名词汇表；只有最终结果，没有边讲边出字</td><td>无；出错不重试，直接结束 session</td><td>马来西亚口音、短句、英巫混讲可能听错</td><td><span class="tag test">测试确认</span> UAT 中位 354 ms</td></tr>
+      <tr><td><b>听写关卡</b><br><span class="tag code">代码确认</span></td><td>本地规则（无模型）</td><td>挡 Whisper 常见幻听、去掉重复</td><td>已知片尾语、来源标签、no_speech/logprob 组合门槛</td><td>—</td><td>只挡已知模式，不保证听对</td><td>几乎无</td></tr>
+      <tr><td><b>LLM</b><br><span class="tag code">代码确认</span></td><td>OpenAI · <code>gpt-5.4-mini</code>（直连）</td><td>决定 Kelly 讲什么</td><td>reasoning <code>none</code>、verbosity <code>low</code>、最多 128 tokens、串流</td><td>SDK 连线重试（最多 3 次）；被关卡拒绝可修一次</td><td>短答有时慢；仍可能讲出关卡没覆盖的内容</td><td><span class="tag hist">历史配置</span> 同模型设定首字中位 1124 ms</td></tr>
+      <tr><td><b>回复关卡</b><br><span class="tag code">代码确认</span></td><td>本地规则（无模型）</td><td>整句检查后才送去合成声音</td><td>未批准事实、承诺动作、号码来源、探访时间、金额等</td><td>拒绝 → 同一模型修 1 次（8 秒内）→ 再失败就礼貌结束</td><td>规则是有限清单，不是语义理解</td><td>要等整句生成完</td></tr>
+      <tr><td><b>TTS</b><br><span class="tag code">代码确认</span></td><td>Fish Audio · <code>s2.1-pro-free</code>（直连 HTTP）</td><td>用 Kelly 的参考声音读出回复</td><td>mp3、44.1 kHz 单声道、语速 1.05、temperature 0.25、top_p 0.5、预设语气 <code>[relaxed]</code></td><td>无备用声音引擎（Cartesia/MiniMax 代码在但未启用）</td><td>英文夹杂发音、长句较慢</td><td><span class="tag test">测试确认</span> 回应头中位 0.39 s</td></tr>
+      <tr><td><b>播放</b><br><span class="tag code">代码确认</span></td><td>LiveKit 音频输出</td><td>把声音送回电话</td><td>重采样到输出采样率；另有背景办公室声（0.25）和打字声（0.15）</td><td>背景音失败不影响通话</td><td>手机端真正听到的时间未测量</td><td><span class="tag unk">未确认</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- 04 -->
+<section id="s04" data-title="STT 听客户讲话">
+  <div class="sec-head"><span class="sec-no">04</span><h2>STT：系统怎么「听」客户讲话</h2></div>
+  <p>STT（语音转文字）负责把客户讲的话写成文字，AI 才能理解。HALODIAL 最后用的是 <b>Groq 提供的 Whisper Large V3</b>。它不是边讲边出字的，而是等客户讲完一段，整段一次送去转写，所以拿到的永远是「完整的一句」。</p>
+  <div class="cols">
+    <div class="box"><h3>设定 <span class="tag code">代码确认</span></h3>
+      <dl class="kv"><dt>Provider</dt><dd>Groq（直连 API）</dd><dt>模型</dt><dd><code>whisper-large-v3</code></dd><dt>语言</dt><dd>固定中文 <code>zh</code>，关闭自动语言侦测</dd><dt>模式</dt><dd>只有最终结果（final-only），无中途字幕</dd><dt>提示词</dt><dd>要求逐字转录、保留原语言、不翻译不总结；附上地名/常用词表（例如 Penang、Gelugor、USM、centre）</dd><dt>重试</dt><dd>0 次。出错就结束 session</dd></dl>
+    </div>
+    <div class="box"><h3>马来西亚华语怎么处理</h3>
+      <ul class="clean">
+        <li>语言锁定 <code>zh</code>，避免一句短短的话被 Whisper 当成别的语言。</li>
+        <li>提示词明确说：讲 English、Malay 的部分照原样写，不要翻成中文。</li>
+        <li>词汇表帮助地名、中心相关字眼。</li>
+        <li>其他文字系统（例如泰文、韩文）出现在短句里，会被当成「听不清」。这条规则只对部分对话阶段生效（见技术细节）。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="box"><h3>举例：听错会怎样？ <span class="tag eval">示例说明，非实测记录</span></h3>
+    <p>例如客户说「好啊」，如果被听成「再见」，系统会以为客户要结束，可能直接礼貌挂电话。源码里没有专门修正这种情况的机制，也没有测试证明已经解决。这类问题只能靠更好的 STT、或者在关键动作（结束通话）前多一层确认来降低。</p>
+  </div>
+  <div class="box"><h3>防幻听（hallucination）关卡 <span class="tag code">代码确认</span></h3>
+    <p>Whisper 在没有人讲话、只有杂音时，有时会「自己生出」一些字，例如「谢谢观看」「字幕由 amara.org 社区提供」「thanks for watching」。HALODIAL 有三层挡：</p>
+    <ol class="clean">
+      <li><b>已知幻听句</b>：命中清单就丢掉，不交给 AI。</li>
+      <li><b>来源标签</b>：像「Malaysian Mandarin phone conversation」这种提示词被原样吐回来的字，也丢掉。</li>
+      <li><b>信心偏低</b>：Groq 回传每段的「没讲话概率」和「平均信心」。只有<em>每一段</em>都同时符合「很可能没讲话 + 信心很低」才丢掉。资料不完整时一律放行，宁可多听也不乱丢。</li>
+    </ol>
+    <p class="note">另外：Whisper 偶尔把同一句话重复两次（例如「可以你说一下重点吧。可以你说一下重点吧。」），系统会自动合并成一句。</p>
+  </div>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p>文件：<code>agent.py</code>（<code>_DeduplicatingGroqSTT</code>）、<code>kelly_groq_stt.py</code>（verbose_json 解析）、<code>groq_segment_binding.py</code>（VAD 分段 + 请求）、<code>kelly_stt_admission.py</code>（拒绝规则）、<code>text_utils.py</code>。</p>
+    <p>拒绝门槛（每一段都要符合其一）：no_speech_prob ≥ 0.6 且 avg_logprob ≤ −1.0；或 no_speech_prob ≥ 0.2 且 avg_logprob ≤ −2.0；或段长 ≤ 1.2 秒且 no_speech_prob ≥ 0.2 且 avg_logprob ≤ −0.7。</p>
+    <p>迟到结果保护（<code>phone_turn_context.py</code>）：如果同一段声音的转写在 Kelly 已经开口后才到，系统只把旧那句改正，不会因此再回答一次。判断依据是「同一段音频的身份」，不是文字相似度。</p>
+    <p>「听不清」的固定提问（「不好意思，我刚才没听清楚，可以再说一次吗？」）只在控制类回合（打招呼、等一下、拒绝、结束等）才会被检查。一般对话回合直接交给主模型，由模型自己决定要不要确认。<span class="tag code">代码确认</span></p>
+    <p>STT API 出错：记录错误类型后 <code>session.shutdown()</code>，不重建 STT，也不重试。</p>
+  </div></details>
+</section>
+
+<!-- 05 -->
+<section id="s05" data-title="VAD 判断讲完">
+  <div class="sec-head"><span class="sec-no">05</span><h2>VAD：怎么知道客户讲完了？</h2></div>
+  <p>系统会先判断客户是不是已经讲完（VAD，语音活动侦测）。这一层用 <b>Silero VAD</b>，再加上 LiveKit 的「端点判断模型」，看语气是不是一句话的结尾。这样 AI 不会客户讲到一半就抢着回答。</p>
+  <div class="flow" aria-label="VAD 判断流程">
+    <div><b>客户讲话</b><small>VAD 侦测到声音</small></div>
+    <div><b>系统继续听</b><small>讲久了会「嗯哼」</small></div>
+    <div><b>判断停顿</b><small>静音 ≥ 0.55 秒</small></div>
+    <div><b>确认讲完</b><small>端点模型 0.2–0.8 秒</small></div>
+    <div class="hl"><b>交给 AI 回答</b><small>整段送去 STT</small></div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>跟 STT 的关系</h3><p>VAD 决定「一段话从哪里开始、到哪里结束」，然后整段才送去 Groq 转写。所以 VAD 判断越慢，后面每一步都跟着慢。</p></div>
+    <div class="box"><h3>跟插话的关系</h3><p>Kelly 在讲话时，如果 VAD 侦测到客户讲话持续 0.5 秒以上，就算客户「插话」，Kelly 会马上停。被打断的那句不会再补播。</p></div>
+    <div class="box"><h3>客户状态</h3><p>系统随时知道客户是「在讲」还是「在听」。很多功能都看这个状态：等待声、聆听声、插话都依赖它。</p></div>
+  </div>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p>Silero 在每个 worker 进程启动时预载（<code>prewarm</code>），用 <code>silero.VAD.load()</code> 预设值（以 livekit-plugins-silero 1.6.10 源码核对）：activation_threshold 0.5、min_speech_duration 0.05 s、min_silence_duration 0.55 s、prefix_padding_duration 0.5 s、sample_rate 16 kHz。<span class="tag code">代码确认</span></p>
+    <p>端点：<code>turn_detection=inference.TurnDetector()</code>（LiveKit 托管的音频端点模型，SDK 预设本地后备）；<code>endpointing min_delay 0.2 / max_delay 0.8</code>。源码注释写明 0.8 这个值「改动当时尚未经真实通话验证」。<span class="tag unk">实际效果未确认</span></p>
+    <p>插话：<code>interruption min_duration 0.5</code>、<code>resume_false_interruption False</code>。没有用「最少字数」条件，因为 Groq 没有中途字幕，加了就等于客户讲完才能插话。</p>
+  </div></details>
+</section>
+
+<!-- 06 -->
+<section id="s06" data-title="AI Brain / LLM">
+  <div class="sec-head"><span class="sec-no">06</span><h2>AI Brain：Kelly 怎么想、怎么决定</h2></div>
+  <div class="cols">
+    <div class="box"><h3>主模型 <span class="tag code">代码确认</span></h3>
+      <dl class="kv"><dt>Provider</dt><dd>OpenAI（直连 API）</dd><dt>模型</dt><dd><code>gpt-5.4-mini</code></dd><dt>Reasoning</dt><dd><code>none</code>（不做长思考，求快）</dd><dt>Verbosity</dt><dd><code>low</code>（回答短）</dd><dt>最大输出</dt><dd>128 tokens</dd><dt>Temperature</dt><dd>没有设定（用模型预设）</dd><dt>对话记忆</dt><dd>最近 24 条对话</dd></dl>
+    </div>
+    <div class="box"><h3>辅助模型 <span class="tag code">代码确认</span></h3>
+      <p>OpenAI <code>gpt-4o-mini</code>：只在客户「拒绝 / 没时间」时，生成一句针对客户原话的告别。2 秒内没好就改用固定句「好，谢谢你今天的时间，拜拜。」</p>
+      <p class="note">OpenRouter 上的两个旧「背景脑」模型（Dolphin Mistral 24B、Llama 3.1 8B）在代码里还会建立连线物件，但 Kelly 的对话流程<b>不会调用</b>。启动时仍然需要它的 key。<span class="tag hist">历史配置 · 未使用</span></p>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>「Kelly 怎么讲话」</h3>
+      <ul class="clean">
+        <li>马来西亚华语为主，English 只在用得上的地方保留，不刻意堆 lah / meh。</li>
+        <li>像日常电话聊天：先接住客户的问题，再推进一个小点就停。</li>
+        <li>用「你」不用「您」（就算模型写了「您」，送去发声前也会被换掉）。</li>
+        <li>不用客服腔：不问「有什么可以帮到你」。这是 Kelly 打出去的电话，不是客户打进来。</li>
+        <li>参考 13 个已整理的场景答法（开场、号码来源、地址、收据扣税等），只用于对应场景。</li>
+      </ul>
+    </div>
+    <div class="box"><h3>「AI 怎么做决定」</h3>
+      <ul class="clean">
+        <li>事实只能来自「批准的中心资料」；资料没写的，就说「我这边没有确认到，我不要乱讲」。</li>
+        <li>结束通话、勿扰登记不是模型决定的，是程序用规则侦测后执行（模型在一般回合根本拿不到挂电话工具）。</li>
+        <li>模型写好的整句先过「回复关卡」，不合格就修一次，再不行就礼貌结束。</li>
+        <li>客户明确问是不是 AI、机器人，必须诚实说是 AI 辅助的来电。</li>
+      </ul>
+    </div>
+  </div>
+  <figure>
+    <div class="flow" aria-label="系统提示词的组成顺序">
+      <div><b>角色与边界</b><small>Kelly 指令、事实边界</small></div>
+      <div><b>电话情境</b><small>外呼、不扮客服</small></div>
+      <div class="hl"><b>批准事实</b><small>中心资料 JSON</small></div>
+      <div><b>风格示例</b><small>只学语气</small></div>
+      <div><b>13 个场景</b><small>只答当下场景</small></div>
+      <div><b>跟进状态</b><small>WhatsApp 进度</small></div>
+      <div><b>最近 24 句</b><small>对话历史</small></div>
+    </div>
+    <figcaption>图 · 每一轮送给主模型的内容，按顺序组合（<code>kelly_business.prompt()</code> + <code>conversation_first.node()</code>）。</figcaption>
+  </figure>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p>传输：<code>livekit.plugins.openai.LLM(model="gpt-5.4-mini", base_url=api.openai.com/v1, reasoning_effort="none", verbosity="low", max_completion_tokens=128)</code>，经 <code>observe_main()</code> 包装（延迟诊断，预设关闭）。</p>
+    <p>工具：<code>end_call</code> 是唯一的 function tool；慈善流程的一般回合会把它从工具清单里拿掉。挂电话由 <code>on_user_turn_completed</code> 的规则判断后直接执行。</p>
+    <p>结构化抽取：Kelly 没有用模型做资料抽取。WhatsApp 同意与号码由本地规则（<code>kelly_handoff.py</code>）根据已播出的对话判断。</p>
+    <p>上下文管理：conversation-first 路径每轮重建 system prompt，只带最近 24 条 user/assistant 讯息；背景 Observer 目前只回传空信号（<code>observe()</code> → <code>{'signals': []}</code>）。</p>
+    <p>注意：<code>charity_contract.guidance()</code>（通话阶段提示）有写好但没有接到 prompt 里。<span class="tag code">代码确认</span></p>
+  </div></details>
+</section>
+
+<!-- 07 -->
+<section id="s07" data-title="TTS Kelly 的声音">
+  <div class="sec-head"><span class="sec-no">07</span><h2>TTS：Kelly 的声音</h2></div>
+  <p>TTS（文字转语音）把 AI 写好的回复读出来。HALODIAL 用 <b>Fish Audio</b>，透过一个「参考声音」让每一句都是同一个 Kelly 的声音。为了让声音稳定，系统会等整句回复写好，再一次合成一整段，不拆句。</p>
+  <div class="cols">
+    <div class="box"><h3>设定 <span class="tag code">代码确认</span></h3>
+      <dl class="kv"><dt>Provider</dt><dd>Fish Audio（直连 HTTP，自写转接器）</dd><dt>模型</dt><dd><code>s2.1-pro-free</code></dd><dt>声音</dt><dd>指定参考声音 ID（私密，未公开）；没设定就拒绝启动</dd><dt>格式</dt><dd>mp3 · 44.1 kHz · 单声道</dd><dt>语速</dt><dd>1.05</dd><dt>稳定度</dt><dd>temperature 0.25 · top_p 0.5 · latency balanced</dd><dt>语气标签</dt><dd>预设 <code>[relaxed]</code>，只允许批准清单内的标签</dd><dt>音量</dt><dd>开启 loudness normalize</dd></dl>
+    </div>
+    <div class="box"><h3>Kelly 的真人录音片段 <span class="tag code">代码确认</span></h3>
+      <p>短短的「嗯～」「呃～」「嗯哼」是<b>真人录好的音档</b>，不是现场合成，所以几乎零延迟。每个档案都用 SHA-256 校验，格式不对就不播，不会随便换别的声音顶上。</p>
+      <ul class="clean"><li>等待声（bridge）：嗯～、呃～、嗯～～～，每个最长 2.8 秒</li><li>聆听声（listener）：嗯哼、嗯，最长 2.4 秒</li></ul>
+      <p class="note">录音档本身不公开。</p>
+    </div>
+    <div class="box"><h3>发声前的文字修整</h3>
+      <ul class="clean"><li>「您」→「你」</li><li>删掉 <code>[excited]</code>（太像推销）</li><li>「你有没有想过要不要」→「要不要」等，几条口语化替换</li><li>删除 Markdown、emoji</li></ul>
+    </div>
+  </div>
+  <div class="box"><h3>马来西亚华语 & 英文夹杂</h3><p>声音模型读中文为主；句子里的英文单字（centre、WhatsApp、tax）由 Fish 自己处理发音，系统没有额外的发音字典。英文发音是否自然 <span class="tag unk">未有系统性测试</span>。</p></div>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p>文件：<code>fish_audio_tts.py</code>（POST <code>api.fish.audio/v1/tts</code>，标头指定模型；回应 chunk 串流推进 emitter）、<code>assistant.py tts_node</code>（整句缓冲后合成）、<code>audio_format.py</code>（重采样到输出采样率，取消时不把旧音频冲进下一轮）。</p>
+    <p>超时：connect 15 s / read 30 s。没有备用 TTS；Cartesia、MiniMax、本地 ChatTTS 代码仍在，但 production 旗标关闭。</p>
+    <p>背景音：<code>BackgroundAudioPlayer</code> 第二条音轨，办公室环境音 volume 0.25，「思考中」打字声 volume 0.15，开场白播完后才启动，5 秒内发布不了就放弃（通话继续）。</p>
+  </div></details>
+</section>
+
+<!-- 08 -->
+<section id="s08" data-title="自然对话机制">
+  <div class="sec-head"><span class="sec-no">08</span><h2>自然对话机制：为什么 Kelly 听起来不像机器</h2></div>
+  <div class="cards" id="naturalCards"></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1000 250" role="img" aria-label="插话流程：Kelly 正在讲，客户开口超过 0.5 秒，Kelly 立刻停止且不补播，客户讲完后才生成新回复。">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <rect class="lane" x="90" y="40" width="890" height="40" rx="6"/><rect class="lane" x="90" y="100" width="890" height="40" rx="6"/><rect class="lane" x="90" y="160" width="890" height="40" rx="6"/>
+      <text class="t" x="20" y="65">客户</text><text class="t" x="20" y="125">Kelly</text><text class="t" x="20" y="185">系统</text>
+      <rect class="barK" x="110" y="108" width="330" height="24" rx="5"/><text x="120" y="125" font-size="12" fill="var(--paper)">Kelly 正在回答…</text>
+      <rect class="ghost" x="440" y="108" width="110" height="24" rx="5"/><text class="tr" x="447" y="125">不再补播</text>
+      <rect class="barC" x="390" y="48" width="330" height="24" rx="5"/><text x="400" y="65" font-size="12" fill="var(--paper)">客户开口插话</text>
+      <line class="ed" x1="390" y1="40" x2="390" y2="215"/><line class="ed" x1="440" y1="40" x2="440" y2="215"/>
+      <text class="ts" x="415" y="232" text-anchor="middle">≥ 0.5 秒</text>
+      <text class="ts" x="450" y="185">Kelly 停 · 等待声取消</text>
+      <line class="ed" x1="720" y1="40" x2="720" y2="215"/>
+      <text class="ts" x="728" y="185">VAD 判断讲完 → STT</text>
+      <rect class="barK" x="860" y="108" width="110" height="24" rx="5"/><text x="868" y="125" font-size="12" fill="var(--paper)">新回复</text>
+      <line class="e" x1="730" y1="120" x2="855" y2="120" marker-end="url(#ar2)"/><text class="ts" x="790" y="112" text-anchor="middle">LLM → 关卡 → TTS</text>
+    </svg>
+    </div>
+    <figcaption>图 · 插话（barge-in）。客户持续讲 0.5 秒以上就算插话，Kelly 立刻停，被打断的句子不会恢复；系统等客户真正讲完，才为「新的这句话」生成回答。</figcaption>
+  </figure>
+</section>
+
+<!-- 09 -->
+<section id="s09" data-title="防止 AI 乱讲话">
+  <div class="sec-head"><span class="sec-no">09</span><h2>防止 AI 乱讲话</h2><p>每一层都标出实作程度。规则检查是有限清单，能挡住已知类型的错误，但不是万无一失。</p></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>保护层</th><th>状态</th><th>它做什么（人话）</th></tr></thead>
+    <tbody id="guardRows"></tbody>
+  </table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10" data-title="Kelly Persona">
+  <div class="sec-head"><span class="sec-no">10</span><h2>Kelly Persona：讲话风格与角色设定</h2></div>
+  <div class="cols">
+    <div class="box"><h3>讲话风格 <span class="tag cfg">配置确认</span></h3>
+      <ul class="clean"><li>马来西亚华语，轻度 Manglish，自然夹 English</li><li>口语、短句，不念稿</li><li>允许小重复、自我修正（「就是…这样子」）</li><li>反应词（哦这样啊、可以啊）只在自然时放进同一句，不每轮开头都来</li></ul>
+    </div>
+    <div class="box"><h3>开场</h3>
+      <p>接通后先说一句很短的 <span class="say"><b>Kelly</b>哈咯？</span></p>
+      <p>这句不能被打断（避免电话杂音把它切掉）。客户回「喂？」「哈咯」这类招呼，Kelly 才讲完整介绍：</p>
+      <p class="say"><b>Kelly</b>哈喽，你好，不好意思打扰到你哈。我是 Kelly，我是代表 Penang Gelugor 这边的残障照护中心打过来的。希望你可以给我们一个机会，了解一下我们这个群体啊。</p>
+    </div>
+    <div class="box"><h3>问题与异议</h3>
+      <ul class="clean"><li>先回答客户当下的问题，不拉回剧本</li><li>怀疑是诈骗：邀请客户到中心看看，不补任何未批准的证明</li><li>问号码哪里来：用批准的「其他慈善团体拜访后推荐」说法，不编团体名字</li><li>问收据能不能扣税：照实说目前不能</li></ul>
+    </div>
+    <div class="box"><h3>结束</h3>
+      <ul class="clean"><li>客户明确拒绝：接受一次、简单告别</li><li>客户说「拜拜 / 不要再打」：固定句「好的，不打扰你了，谢谢你啊，拜拜。」然后挂线</li><li>愿意收资料：确认 WhatsApp 号码，由真人之后跟进</li></ul>
+    </div>
+  </div>
+  <div class="box"><h3>真实机构资料 vs 脚本角色设定</h3>
+    <div class="tablewrap" style="border:0"><table>
+      <thead><tr><th>内容</th><th>类别</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>中心位置（Penang Gelugor 一带）、照顾约 20 人、4 位工作人员、成立日期、收据目前不能扣税</td><td><span class="tag cfg">营运方批准的中心资料</span></td><td>由营运方提供并批准写进配置。本文件没有独立核实这些资料。</td></tr>
+        <tr><td>号码来源（其他慈善团体拜访后推荐）</td><td><span class="tag cfg">营运方批准的说法</span></td><td>早期开发文件曾标记「来源未核实」；后来营运方批准使用。具体团体名称从未提供。</td></tr>
+        <tr><td>Kelly 这个名字、她的个人背景（兼职社工、家庭和工作状况、帮忙中心的年数）</td><td><span class="tag adj">脚本角色设定</span></td><td>这是写给 AI 角色的设定，不是一位真实员工的资料。</td></tr>
+        <tr><td>AI 身份</td><td><span class="tag code">代码确认</span></td><td>指令要求：客户问是不是 AI，必须诚实说明是 AI 辅助来电，不得冒充真人。不会主动提起。</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">技术评估：一个 AI 角色以第一人称讲个人家庭故事来争取支持，即使客户问起会承认是 AI，仍建议由营运方的法律/合规负责人确认这种设定是否符合当地慈善募款与消费者保护要求。</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section id="s11" data-title="Call State Machine">
+  <div class="sec-head"><span class="sec-no">11</span><h2>通话状态机</h2><p>以下是数据库 <code>call_jobs.status</code> 的真实状态与允许的转换。点任何一个状态看说明。</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" id="stateSvg" viewBox="0 0 1010 330" role="img" aria-label="通话状态机：DISPATCHING 到 CLAIMED 到 DIALING 到 ANSWERED 到 COMPLETED；DIALING 可结束为 NO_ANSWER、BUSY、REJECTED；多个阶段可进入 FAILED 或 UNKNOWN；拨号前可 CANCELLED。">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <g class="st" tabindex="0" data-k="QUEUED"><rect class="nd stb" x="10" y="150" width="140" height="44" rx="10"/><text class="tm" x="80" y="171" text-anchor="middle">queued</text><text class="ts" x="80" y="187" text-anchor="middle">联系人排队中</text></g>
+      <g class="st" tabindex="0" data-k="DISPATCHING"><rect class="n stb" x="180" y="150" width="140" height="44" rx="10"/><text class="tm" x="250" y="171" text-anchor="middle">DISPATCHING</text><text class="ts" x="250" y="187" text-anchor="middle">派工中</text></g>
+      <g class="st" tabindex="0" data-k="CLAIMED"><rect class="n stb" x="350" y="150" width="140" height="44" rx="10"/><text class="tm" x="420" y="171" text-anchor="middle">CLAIMED</text><text class="ts" x="420" y="187" text-anchor="middle">worker 已领取</text></g>
+      <g class="st" tabindex="0" data-k="DIALING"><rect class="n stb" x="520" y="150" width="140" height="44" rx="10"/><text class="tm" x="590" y="171" text-anchor="middle">DIALING</text><text class="ts" x="590" y="187" text-anchor="middle">拨号/响铃</text></g>
+      <g class="st" tabindex="0" data-k="ANSWERED"><rect class="na stb" x="690" y="150" width="140" height="44" rx="10"/><text class="tm" x="760" y="171" text-anchor="middle">ANSWERED</text><text class="ts" x="760" y="187" text-anchor="middle">通话中</text></g>
+      <g class="st" tabindex="0" data-k="COMPLETED"><rect class="na stb" x="860" y="150" width="140" height="44" rx="10"/><text class="tm" x="930" y="171" text-anchor="middle">COMPLETED</text><text class="ts" x="930" y="187" text-anchor="middle">正常结束</text></g>
+      <g class="st" tabindex="0" data-k="CANCELLED"><rect class="nd stb" x="180" y="20" width="140" height="44" rx="10"/><text class="tm" x="250" y="41" text-anchor="middle">CANCELLED</text><text class="ts" x="250" y="57" text-anchor="middle">拨号前取消</text></g>
+      <g class="st" tabindex="0" data-k="FAILED"><rect class="nx stb" x="440" y="20" width="140" height="44" rx="10"/><text class="tm" x="510" y="41" text-anchor="middle">FAILED</text><text class="ts" x="510" y="57" text-anchor="middle">确定失败</text></g>
+      <g class="st" tabindex="0" data-k="UNKNOWN"><rect class="nu stb" x="650" y="20" width="200" height="44" rx="10"/><text class="tm" x="750" y="41" text-anchor="middle">UNKNOWN</text><text class="ts" x="750" y="57" text-anchor="middle">结果不确定 · 需人工检查</text></g>
+      <g class="st" tabindex="0" data-k="NO_ANSWER"><rect class="n stb" x="360" y="270" width="140" height="44" rx="10"/><text class="tm" x="430" y="291" text-anchor="middle">NO_ANSWER</text><text class="ts" x="430" y="307" text-anchor="middle">20 秒没人接</text></g>
+      <g class="st" tabindex="0" data-k="BUSY"><rect class="n stb" x="520" y="270" width="140" height="44" rx="10"/><text class="tm" x="590" y="291" text-anchor="middle">BUSY</text><text class="ts" x="590" y="307" text-anchor="middle">占线</text></g>
+      <g class="st" tabindex="0" data-k="REJECTED"><rect class="n stb" x="680" y="270" width="140" height="44" rx="10"/><text class="tm" x="750" y="291" text-anchor="middle">REJECTED</text><text class="ts" x="750" y="307" text-anchor="middle">被拒接</text></g>
+      <line class="ed" x1="150" y1="172" x2="178" y2="172" marker-end="url(#ar3)"/>
+      <line class="e" x1="320" y1="172" x2="348" y2="172" marker-end="url(#ar3)"/>
+      <line class="e" x1="490" y1="172" x2="518" y2="172" marker-end="url(#ar3)"/>
+      <line class="ej" x1="660" y1="172" x2="688" y2="172" marker-end="url(#ar3)"/>
+      <line class="ej" x1="830" y1="172" x2="858" y2="172" marker-end="url(#ar3)"/>
+      <line class="e" x1="250" y1="150" x2="250" y2="66" marker-end="url(#ar3)"/>
+      <polyline class="e" points="420,150 420,110 760,110 760,150"/>
+      <line class="e" x1="590" y1="150" x2="590" y2="110"/>
+      <line class="e" x1="510" y1="110" x2="510" y2="66" marker-end="url(#ar3)"/>
+      <line class="e" x1="750" y1="110" x2="750" y2="66" marker-end="url(#ar3)"/>
+      <text class="ts" x="600" y="103">失败 / 不确定</text>
+      <line class="e" x1="575" y1="194" x2="440" y2="268" marker-end="url(#ar3)"/>
+      <line class="e" x1="590" y1="194" x2="590" y2="268" marker-end="url(#ar3)"/>
+      <line class="e" x1="605" y1="194" x2="740" y2="268" marker-end="url(#ar3)"/>
+    </svg>
+    </div>
+    <figcaption>图 · 状态机（<code>kelly-jobs.ts legalTransition</code>）。queued 是联系人在 <code>task_recipients</code> 的状态；派工器建立 job 时直接从 DISPATCHING 开始。UNKNOWN 不会自动释放，也不会自动重拨。</figcaption>
+  </figure>
+  <div class="stinfo" id="stateInfo" aria-live="polite"></div>
+</section>
+
+<!-- 12 -->
+<section id="s12" data-title="Dispatcher 派工器">
+  <div class="sec-head"><span class="sec-no">12</span><h2>Dispatcher：谁决定下一通打给谁？</h2></div>
+  <p><b>人话：</b>派工器像一个值班员，每一秒看一次：现在有没有空位？今天打满了没有？活动有没有暂停？都 OK 的话，挑最早排队、而且合法可以打的一位联系人，开一张「工单」，再请 LiveKit 叫一个 Kelly 来接这张工单。</p>
+  <div class="flow" aria-label="派工器每秒循环">
+    <div><b>每 1 秒</b><small>写自己的服务心跳</small></div>
+    <div><b>清理超时</b><small>120 秒没心跳 → UNKNOWN</small></div>
+    <div><b>检查闸门</b><small>暂停？并发？今日上限？</small></div>
+    <div class="hl"><b>挑联系人</b><small>最早排队且合格</small></div>
+    <div><b>开工单</b><small>DISPATCHING · 90 秒内要被领取</small></div>
+    <div><b>请 LiveKit 派工</b><small>25 秒超时</small></div>
+    <div><b>派工失败</b><small>FAILED 或 UNKNOWN，不重试</small></div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>挑人时的条件 <span class="tag code">代码确认</span></h3>
+      <ul class="clean">
+        <li>任务 running、活动 active、公司 active</li>
+        <li>联系人没有选择退出（opted_out），没有被封存</li>
+        <li>不在公司勿扰名单，也不在全局勿扰名单</li>
+        <li>同一个号码没有正在进行中的通话</li>
+        <li>Kelly 这个语音 agent 已分配给公司且可用</li>
+        <li>活动本身的并发上限、测试通话独占</li>
+        <li>号码必须是 E.164 格式（+60…）</li>
+      </ul>
+    </div>
+    <div class="box"><h3>安全上限 <span class="tag cfg">配置确认</span> <span class="tag adj">可调整</span></h3>
+      <dl class="kv"><dt>同时通话</dt><dd>预设 1 通（<code>PREPROD_MAX_CONCURRENCY</code>）</dd><dt>每日上限</dt><dd>预设 20 通（马来西亚时区计日）</dd><dt>全局暂停</dt><dd>数据库开关 <code>kelly_dispatch_control.paused</code></dd><dt>重拨</dt><dd>没有自动重拨。每位联系人派一次就记录次数</dd></dl>
+      <p class="note">最后 production 实际设定的数值存在私密环境档，<span class="tag unk">未确认</span>是否改过预设。</p>
+    </div>
+    <div class="box"><h3>失败怎么处理</h3>
+      <ul class="clean">
+        <li>LiveKit 明确拒绝派工（400–404）→ FAILED，释放名额</li>
+        <li>其他不确定错误 → UNKNOWN，<b>名额继续占住</b>，要人工检查</li>
+        <li>worker 领了但 120 秒没心跳 → UNKNOWN，名额继续占住</li>
+        <li>UNKNOWN 永远不会自动重新排队，避免同一个人被打两次</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 13 -->
+<section id="s13" data-title="Heartbeat 与通话所有权">
+  <div class="sec-head"><span class="sec-no">13</span><h2>Heartbeat 与通话所有权</h2></div>
+  <p>Heartbeat（心跳）是 worker 每 15 秒跟后台说一声「这通电话我还在处理」。后台如果 120 秒没听到，就知道 worker 可能当掉了，会把这通电话标记为「不确定」，交给人看，而不是假装成功或偷偷重打。</p>
+  <div class="flow" aria-label="通话心跳生命周期">
+    <div><b>领取工单</b><small>一次性密钥 + worker 身份</small></div>
+    <div><b>报告 DIALING</b><small>后台确认后才准拨号</small></div>
+    <div><b>SIP 拨号</b><small>最多响 20 秒</small></div>
+    <div class="hl"><b>客户接听</b><small>ANSWERED</small></div>
+    <div class="hl"><b>开始 heartbeat</b><small>每 15 秒一次</small></div>
+    <div><b>通话进行</b><small>逐句写入对话</small></div>
+    <div><b>结束 finalize</b><small>心跳停止，释放名额</small></div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>为什么接听后才开始心跳</h3><p>源码刻意等 SIP 接通才开始心跳（有一个专门的提交「只在 SIP 接听后开始 production heartbeat」）。响铃阶段由 SIP 自己的 20 秒超时控制。<span class="tag code">代码确认</span></p></div>
+    <div class="box"><h3>所有权怎么保护</h3><ul class="clean"><li>每张工单有自己的随机密钥（数据库只存杂凑值）</li><li>只能被领取一次，领取后绑定 worker 身份</li><li>之后每个事件都要同一个 worker 身份才收</li><li>每个事件有唯一 ID，重送不会重复写入</li></ul></div>
+    <div class="box"><h3>网络断了怎么办</h3><p>worker 把事件先写进本机「寄件箱」档案（写入后 fsync），背景每 2 秒重送一次，直到后台收下。寄件箱只会重送「事件」和「结束」，绝不会重新领取或重新拨号。</p></div>
+  </div>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p><code>production_job.py</code>：<code>claim()</code> 一次请求不重试；<code>before_dial()</code> 把 DIALING 事件放进寄件箱并立刻重送，档案还在（后台没收下）就抛错，worker 以 <code>DIAL_AUTHORIZATION_UNCONFIRMED</code> 结束，不会拨号。<code>answered()</code> 才启动 15 秒心跳迴圈。</p>
+    <p>另有「服务心跳」：worker 与 dispatcher 每 15 秒各自登记 ready；后台 <code>/ready</code> 要求两者都在 45 秒内回报过。</p>
+    <p>后台 <code>stale()</code>：<code>slot_reserved</code> 且 <code>heartbeat_at</code> 超过 120 秒 → <code>UNKNOWN</code>、<code>review_required=true</code>、<code>error_code=STALE_WORKER</code>。</p>
+  </div></details>
+</section>
+
+<!-- 14 -->
+<section id="s14" data-title="Backend">
+  <div class="sec-head"><span class="sec-no">14</span><h2>Backend</h2></div>
+  <div class="cols">
+    <div class="box"><h3>技术 <span class="tag code">代码确认</span></h3>
+      <dl class="kv"><dt>语言</dt><dd>TypeScript（ESM）</dd><dt>Runtime</dt><dd>Node.js 20.19.5（Docker）</dd><dt>框架</dt><dd>Fastify 4</dd><dt>数据库</dt><dd>原生 SQL（pg），没有 ORM</dd><dt>验证</dt><dd>Zod 检查每个输入</dd><dt>登入</dt><dd>JWT（@fastify/jwt）+ bcrypt 密码</dd></dl>
+    </div>
+    <div class="box"><h3>权限与公司隔离</h3>
+      <ul class="clean">
+        <li>每个请求都重新查数据库确认：帐号还启用、角色和公司没变</li>
+        <li>公司用户只能用「公司工作区」相关接口</li>
+        <li>所有查询都限定在自己的公司</li>
+        <li>Master（super_admin）另有一套平台管理接口</li>
+        <li>worker 用的内部接口不经过外网（Caddy 直接回 404）</li>
+      </ul>
+    </div>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>接口分组</th><th>用途</th><th>谁可以用</th></tr></thead>
+    <tbody>
+      <tr><td>登入 / 帐号</td><td>登入、查看自己的资料</td><td>所有角色</td></tr>
+      <tr><td>公司工作区</td><td>总览、联系人、活动（开始/暂停/继续/停止）、CSV 导入、测试通话、通话记录、跟进、勿扰名单、语音 agent</td><td>company_admin（super_admin 可跨公司）</td></tr>
+      <tr><td>Master 平台管理</td><td>所有公司、活动、通话、跟进、勿扰、agent 分配、使用量、系统健康、用户、审计纪录、搜索</td><td>super_admin</td></tr>
+      <tr><td>Worker 内部接口</td><td>领取工单、写入事件、结束通话、服务心跳</td><td>只限内部网络 + 共享密钥</td></tr>
+      <tr><td>健康检查</td><td>数据库是否正常、worker 与 dispatcher 是否就绪</td><td>部署监控</td></tr>
+      <tr><td>旧版路由</td><td>Asterisk/ElevenLabs 时代的 demo 拨号等</td><td>在 production 模式下被挡掉 <span class="tag hist">历史配置</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="box"><h3>录音与使用量 <span class="tag code">代码确认</span></h3><p>Kelly 的通话<b>没有录音</b>（通话详情接口固定回传 <code>recording: null</code>，后台有录音页面但 Kelly 不产生录音）。使用量栏位（STT 秒数、tokens、TTS bytes）数据库支援，但 worker 结束时传的是 <code>usage: null</code>，所以<b>目前没有真实使用量数据</b>。</p></div>
+</section>
+
+<!-- 15 -->
+<section id="s15" data-title="Database">
+  <div class="sec-head"><span class="sec-no">15</span><h2>Database：资料放在哪里</h2><p>PostgreSQL 15，14 个依序执行的 migration。下图只画 Kelly 用得到的主要关系，不含任何真实资料。</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 960 500" role="img" aria-label="资料关系图：公司拥有用户、活动和语音 agent 分配；活动有联系人和任务；任务的每位收件人产生 call_jobs，对应 call_attempts、事件、逐句对话和 WhatsApp 跟进。">
+      <g>
+        <rect class="na" x="20" y="20" width="190" height="50" rx="8"/><text class="tm" x="115" y="41" text-anchor="middle">companies</text><text class="ts" x="115" y="59" text-anchor="middle">公司（租户）</text>
+        <rect class="n" x="20" y="120" width="190" height="50" rx="8"/><text class="tm" x="115" y="141" text-anchor="middle">users</text><text class="ts" x="115" y="159" text-anchor="middle">帐号与角色</text>
+        <rect class="n" x="270" y="20" width="190" height="50" rx="8"/><text class="tm" x="365" y="41" text-anchor="middle">company_voice_agents</text><text class="ts" x="365" y="59" text-anchor="middle">agent 分配</text>
+        <rect class="n" x="520" y="20" width="190" height="50" rx="8"/><text class="tm" x="615" y="41" text-anchor="middle">voice_agents</text><text class="ts" x="615" y="59" text-anchor="middle">语音 agent（Kelly）</text>
+        <rect class="n" x="270" y="120" width="190" height="50" rx="8"/><text class="tm" x="365" y="141" text-anchor="middle">campaigns</text><text class="ts" x="365" y="159" text-anchor="middle">外呼活动</text>
+        <rect class="n" x="520" y="120" width="190" height="50" rx="8"/><text class="tm" x="615" y="141" text-anchor="middle">leads</text><text class="ts" x="615" y="159" text-anchor="middle">联系人</text>
+        <rect class="n" x="270" y="220" width="190" height="50" rx="8"/><text class="tm" x="365" y="241" text-anchor="middle">tasks</text><text class="ts" x="365" y="259" text-anchor="middle">执行批次</text>
+        <rect class="n" x="520" y="220" width="190" height="50" rx="8"/><text class="tm" x="615" y="241" text-anchor="middle">task_recipients</text><text class="ts" x="615" y="259" text-anchor="middle">排队中的收件人</text>
+        <rect class="na" x="520" y="320" width="190" height="50" rx="8"/><text class="tm" x="615" y="341" text-anchor="middle">call_jobs</text><text class="ts" x="615" y="359" text-anchor="middle">Kelly 通话工单</text>
+        <rect class="n" x="270" y="320" width="190" height="50" rx="8"/><text class="tm" x="365" y="341" text-anchor="middle">call_attempts</text><text class="ts" x="365" y="359" text-anchor="middle">通话纪录</text>
+        <rect class="n" x="760" y="320" width="180" height="50" rx="8"/><text class="tm" x="850" y="341" text-anchor="middle">call_events</text><text class="ts" x="850" y="359" text-anchor="middle">事件流水帐</text>
+        <rect class="n" x="270" y="420" width="190" height="50" rx="8"/><text class="tm" x="365" y="441" text-anchor="middle">kelly_transcript_turns</text><text class="ts" x="365" y="459" text-anchor="middle">逐句对话</text>
+        <rect class="nr" x="520" y="420" width="190" height="50" rx="8"/><text class="tm" x="615" y="441" text-anchor="middle">whatsapp_handoffs</text><text class="ts" x="615" y="459" text-anchor="middle">人工跟进</text>
+        <rect class="n" x="20" y="420" width="190" height="50" rx="8"/><text class="tm" x="115" y="441" text-anchor="middle">transcripts</text><text class="ts" x="115" y="459" text-anchor="middle">整份对话文字</text>
+        <rect class="nx" x="20" y="270" width="190" height="50" rx="8"/><text class="tm" x="115" y="291" text-anchor="middle">company_suppression_list</text><text class="ts" x="115" y="309" text-anchor="middle">公司勿扰名单</text>
+        <rect class="nx" x="760" y="120" width="180" height="50" rx="8"/><text class="tm" x="850" y="141" text-anchor="middle">suppression_list</text><text class="ts" x="850" y="159" text-anchor="middle">全局勿扰名单</text>
+        <rect class="nd" x="760" y="20" width="180" height="50" rx="8"/><text class="tm" x="850" y="41" text-anchor="middle">kelly_dispatch_control</text><text class="ts" x="850" y="59" text-anchor="middle">全局暂停开关</text>
+        <rect class="nd" x="760" y="220" width="180" height="50" rx="8"/><text class="tm" x="850" y="241" text-anchor="middle">service_heartbeats</text><text class="ts" x="850" y="259" text-anchor="middle">服务就绪心跳</text>
+      </g>
+      <line class="e" x1="115" y1="70" x2="115" y2="120"/>
+      <line class="e" x1="210" y1="45" x2="270" y2="45"/>
+      <line class="e" x1="460" y1="45" x2="520" y2="45"/>
+      <line class="e" x1="210" y1="60" x2="270" y2="135"/>
+      <line class="e" x1="365" y1="70" x2="365" y2="120"/>
+      <line class="e" x1="460" y1="145" x2="520" y2="145"/>
+      <line class="e" x1="365" y1="170" x2="365" y2="220"/>
+      <line class="e" x1="460" y1="245" x2="520" y2="245"/>
+      <line class="e" x1="615" y1="170" x2="615" y2="220"/>
+      <line class="ej" x1="615" y1="270" x2="615" y2="320"/>
+      <line class="ej" x1="520" y1="345" x2="460" y2="345"/>
+      <line class="e" x1="710" y1="345" x2="760" y2="345"/>
+      <line class="e" x1="365" y1="370" x2="365" y2="420"/>
+      <line class="e" x1="430" y1="370" x2="560" y2="420"/>
+      <line class="e" x1="290" y1="370" x2="180" y2="420"/>
+      <text class="ts" x="470" y="38">分配</text><text class="ts" x="472" y="138">1 对多</text><text class="ts" x="622" y="300">1 次派工</text><text class="ts" x="470" y="338">1 对 1</text>
+    </svg>
+    </div>
+    <figcaption>图 · 资料关系（简化）。绿色是核心：每一通 Kelly 电话 = 一张 <code>call_jobs</code> 工单 + 一笔 <code>call_attempts</code> 纪录。勿扰名单（红）在派工和领取时都会检查。</figcaption>
+  </figure>
+  <div class="tablewrap"><table>
+    <thead><tr><th>表</th><th>存什么（人话）</th></tr></thead>
+    <tbody id="entityRows"></tbody>
+  </table></div>
+</section>
+
+<!-- 16 -->
+<section id="s16" data-title="Company Admin">
+  <div class="sec-head"><span class="sec-no">16</span><h2>Company Admin：公司后台能做什么</h2><p>公司管理员登入后看到的是自己公司的工作区。左边选单（以源码 <code>CompanyShell</code> 为准）：</p></div>
+  <div class="cards">
+    <div class="card"><h3>Overview 总览</h3><p>今天打了多少、接通多少、完成多少、待跟进数量。</p></div>
+    <div class="card"><h3>Contacts 联系人</h3><p>新增、编辑、移除联系人（号码必须 E.164）；可标记同意状态和偏好语言。</p></div>
+    <div class="card"><h3>Campaigns 活动</h3><p>建立活动、CSV 导入（单档最多 5000 行，先预览再确认）、开始/暂停/继续/停止。</p></div>
+    <div class="card"><h3>Test Call 测试通话</h3><p>公司管理员可以先打一通测试电话，有预检（号码、agent、名额）。测试通话会独占名额。</p></div>
+    <div class="card"><h3>Calls 通话纪录</h3><p>每通电话的状态、结果、接通/结束时间、逐句对话、勿扰事件。号码只显示末四码。</p></div>
+    <div class="card"><h3>Follow-ups 跟进</h3><p>客户同意后留下的 WhatsApp 跟进，可标记 contacted / completed / cancelled 并写备注。</p></div>
+    <div class="card"><h3>Do Not Call 勿扰名单</h3><p>查看、新增、移除公司勿扰号码（原因：opt_out、dnc、complaint）。</p></div>
+    <div class="card"><h3>Voice Agents</h3><p>看公司被分配到的语音 agent（Kelly）与状态。</p></div>
+    <div class="card"><h3>Account 帐号</h3><p>个人帐号资料。</p></div>
+  </div>
+  <p class="note">角色：公司工作区接口只接受 <code>company_admin</code>（以及跨公司的 super_admin）；一般 <code>user</code> 角色存在于资料表，但工作区接口会拒绝它。<span class="tag code">代码确认</span></p>
+</section>
+
+<!-- 17 -->
+<section id="s17" data-title="Master Admin">
+  <div class="sec-head"><span class="sec-no">17</span><h2>Master Admin：平台层管理</h2></div>
+  <p>平台管理员（super_admin）有一个跨公司的「控制中心」。每个请求都会重新确认身份是否仍是有效的 super_admin。主要功能：</p>
+  <div class="cards">
+    <div class="card"><h3>平台总览</h3><p>公司数、可用 agent、进行中的活动、今日通话、需要人工检查的通话、勿扰统计、最近活动。</p></div>
+    <div class="card"><h3>公司 / 用户</h3><p>建立和管理公司、用户、角色与启用状态。</p></div>
+    <div class="card"><h3>语音 agent 分配</h3><p>决定哪个公司可以用哪个 agent，或停用某个 agent。</p></div>
+    <div class="card"><h3>营运资料</h3><p>跨公司查看活动、通话、跟进、勿扰、录音清单。</p></div>
+    <div class="card"><h3>使用量 & 系统健康</h3><p>使用量页面存在，但 Kelly 目前不回报真实用量；系统健康页看服务心跳。</p></div>
+    <div class="card"><h3>审计纪录 & 搜索</h3><p>平台操作纪录与跨资料搜索。</p></div>
+  </div>
+</section>
+
+<!-- 18 -->
+<section id="s18" data-title="Infrastructure">
+  <div class="sec-head"><span class="sec-no">18</span><h2>Infrastructure：最后 Production 部署架构</h2><p><span class="tag off">目前服务器已暂停/下线</span> 以下依据 production 的 <code>docker-compose.yml</code>。</p></div>
+  <div class="ext"><div><b>Internet</b><br>使用者浏览器</div><div><b>DNS</b><br>自有域名 → 主机</div><div><b>主机</b><br>单台 Linux 主机 · Docker Compose<br><span class="tag unk">供应商：用户说明是 DigitalOcean，源码未记载</span></div></div>
+  <div class="host">
+    <span class="lbl">docker compose · 单一主机 · 只有 Caddy 对外开 80/443</span>
+    <div class="ctrs">
+      <div class="ctr pub"><b>proxy</b>Caddy 2.10.2 · 自动 HTTPS、HSTS、拦截内部路径</div>
+      <div class="ctr"><b>admin</b>Next.js 15.5 后台（standalone）</div>
+      <div class="ctr"><b>backend</b>Fastify API · 健康检查每 15 秒</div>
+      <div class="ctr"><b>postgres</b>PostgreSQL 15.19 · 不对外</div>
+      <div class="ctr"><b>kelly-worker</b>Python 3.13.7 · LiveKit worker · 非 root 用户</div>
+      <div class="ctr"><b>kelly-dispatcher</b>同一个 image · Node 派工迴圈</div>
+      <div class="ctr"><b>migrate</b>需要时才跑 · 套用 14 个 migration</div>
+    </div>
+    <span class="lbl">volumes：数据库 · worker 寄件箱 · 本地对话纪录 · 人工跟进档 · 通话控制档 · Caddy 凭证</span>
+  </div>
+  <div class="ext"><div><b>LiveKit</b><br>SIP 外呼与媒体 <span class="tag unk">Cloud/自建未确认</span></div><div><b>SIP trunk</b><br>透过 trunk ID 设定 <span class="tag unk">线路商未确认</span></div><div><b>Groq</b><br>STT</div><div><b>OpenAI</b><br>主模型 + 告别句</div><div><b>Fish Audio</b><br>TTS</div><div><b>S3 储存</b><br>环境档有栏位；Kelly 不录音</div></div>
+  <details class="tech"><summary>技术细节</summary><div>
+    <p>Kelly image 以 backend image 为底，内含 Node 执行档与已编译的 backend，所以 dispatcher 用同一个 image 跑 <code>node dist/scripts/kelly-dispatcher.js</code>。</p>
+    <p>建置时：预载 Silero 模型、以 SHA-256 核对所有原始码与音档清单、建立 uid 10001 用户、核对音档格式。启动时：再核对一次清单、核对 SDK 版本（livekit-agents 1.6.10 / livekit 1.1.14）、缺任何必要设定就拒绝启动。</p>
+    <p>部署流程（文件记载）：<code>config --quiet</code> → build backend/admin → build kelly-worker → 起 postgres → 跑 migrate → 起其余服务。CI/CD 是否用于这个 production 包 <span class="tag unk">未确认</span>。</p>
+  </div></details>
+</section>
+
+<!-- 19 -->
+<section id="s19" data-title="External Providers">
+  <div class="sec-head"><span class="sec-no">19</span><h2>External Providers：依赖哪些外部服务</h2></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 900 300" role="img" aria-label="外部依赖图：Kelly worker 依赖 LiveKit、SIP 线路、Groq、OpenAI、Fish Audio；OpenRouter 只在启动时需要 key、通话中不调用。">
+      <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <rect class="na" x="350" y="125" width="200" height="50" rx="10"/><text class="t" x="450" y="148" text-anchor="middle">Kelly Worker</text><text class="ts" x="450" y="165" text-anchor="middle">每通电话都依赖</text>
+      <rect class="n" x="30" y="30" width="200" height="50" rx="10"/><text class="t" x="130" y="53" text-anchor="middle">LiveKit</text><text class="ts" x="130" y="70" text-anchor="middle">没有它：完全不能打</text>
+      <rect class="n" x="30" y="220" width="200" height="50" rx="10"/><text class="t" x="130" y="243" text-anchor="middle">SIP 线路</text><text class="ts" x="130" y="260" text-anchor="middle">没有它：拨不出去</text>
+      <rect class="n" x="670" y="20" width="200" height="50" rx="10"/><text class="t" x="770" y="43" text-anchor="middle">Groq</text><text class="ts" x="770" y="60" text-anchor="middle">没有它：听不到客户</text>
+      <rect class="n" x="670" y="125" width="200" height="50" rx="10"/><text class="t" x="770" y="148" text-anchor="middle">OpenAI</text><text class="ts" x="770" y="165" text-anchor="middle">没有它：不能回答</text>
+      <rect class="nr" x="670" y="230" width="200" height="50" rx="10"/><text class="t" x="770" y="253" text-anchor="middle">Fish Audio</text><text class="ts" x="770" y="270" text-anchor="middle">没有它：没有声音</text>
+      <rect class="nd" x="350" y="240" width="200" height="44" rx="10"/><text class="t" x="450" y="260" text-anchor="middle">OpenRouter</text><text class="ts" x="450" y="276" text-anchor="middle">只需 key 才能启动</text>
+      <line class="e" x1="350" y1="140" x2="232" y2="62" marker-end="url(#ar4)"/>
+      <line class="e" x1="230" y1="245" x2="350" y2="165" marker-start="url(#ar4)"/>
+      <line class="e" x1="550" y1="140" x2="668" y2="50" marker-end="url(#ar4)"/>
+      <line class="e" x1="550" y1="150" x2="668" y2="150" marker-end="url(#ar4)"/>
+      <line class="e" x1="550" y1="162" x2="668" y2="250" marker-end="url(#ar4)"/>
+      <line class="ed" x1="450" y1="175" x2="450" y2="238"/>
+    </svg>
+    </div>
+    <figcaption>图 · 外部依赖。实线的任何一家出问题，通话就会受影响；虚线 OpenRouter 只影响启动（缺 key 会拒绝启动）。</figcaption>
+  </figure>
+  <div class="cards" id="providerCards"></div>
+</section>
+
+<!-- 20 -->
+<section id="s20" data-title="Technology Stack">
+  <div class="sec-head"><span class="sec-no">20</span><h2>Technology Stack</h2></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>类别</th><th>技术与版本</th><th>状态</th></tr></thead>
+    <tbody id="stackRows"></tbody>
+  </table></div>
+</section>
+
+<!-- 21 -->
+<section id="s21" data-title="Latency 一秒里面">
+  <div class="sec-head"><span class="sec-no">21</span><h2>Latency：一秒里面发生什么</h2><p>只放能在 repository 里找到依据的数字。每一条都标明来源与是否就是 Kelly production。</p></div>
+  <div class="box">
+    <h3>各环节耗时（中位数，浅色延伸到 P90）</h3>
+    <div class="bars" id="bars"></div>
+    <div class="axis"><span></span><div><span>0</span><span>1 s</span><span>2 s</span><span>3 s</span><span>4 s</span><span>5 s</span></div></div>
+    <p class="note">绿色：Kelly 测试通话日志（2026-09-20，4 通 UAT，正式包前的版本），由本页作者从日志计算。灰色：同一主模型设定在前一个角色（Eunice）的历史 UAT 报告。这些都是服务端时间，不是客户手机真正听到声音的时间。</p>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>环节</th><th>已知数字</th><th>来源</th></tr></thead>
+    <tbody>
+      <tr><td>VAD 判断讲完</td><td>规则上至少静音 0.55 s，端点再等 0.2–0.8 s</td><td><span class="tag code">代码确认</span> 设定值，不是量测</td></tr>
+      <tr><td>讲完 → 系统确认这一句</td><td>中位 620 ms</td><td><span class="tag hist">历史配置</span> Eunice UAT 2026-09-09（16 轮）</td></tr>
+      <tr><td>STT（Groq 请求 → 回应）</td><td>中位 354 ms · P90 456 ms · 最慢 1751 ms（n=58）</td><td><span class="tag test">测试确认</span> Kelly UAT 日志</td></tr>
+      <tr><td>LLM（请求 → 第一个字）</td><td>中位 1124 ms · P90 2015 ms</td><td><span class="tag hist">历史配置</span> Eunice UAT，同模型同参数；Kelly <span class="tag unk">未确认</span></td></tr>
+      <tr><td>回复关卡</td><td>中位约 1.5 ms</td><td><span class="tag hist">历史配置</span> Eunice UAT</td></tr>
+      <tr><td>TTS（Fish 请求 → 回应开始）</td><td>中位 0.39 s · P90 0.53 s（n=55）</td><td><span class="tag test">测试确认</span> Kelly UAT 日志</td></tr>
+      <tr><td>TTS（整段音频下载完）</td><td>中位 2.64 s · P90 4.89 s（n=44）</td><td><span class="tag test">测试确认</span> Kelly UAT 日志；声音边下载边播，不必等完</td></tr>
+      <tr><td>等待声开始</td><td>客户停讲后 0.30 s；8 秒内连续用过则 0.65 s</td><td><span class="tag test">测试确认</span> 日志与设定一致</td></tr>
+      <tr><td>客户讲完 → Kelly 声音来源就绪</td><td>中位 2537 ms · P90 3198 ms</td><td><span class="tag hist">历史配置</span> Eunice UAT</td></tr>
+      <tr><td>网络 / 手机播放</td><td>—</td><td><span class="tag unk">未在当前 source 中验证</span></td></tr>
+    </tbody>
+  </table></div>
+  <p><b>延迟通常来自哪里：</b>最大块是 LLM 想第一个字，其次是「确认客户讲完」本身的等待。因为回复要整句检查完才合成声音，LLM 写完整句的时间也会加进去。等待声「嗯～」就是用来盖住这段空白。</p>
+</section>
+
+<!-- 22 -->
+<section id="s22" data-title="Failure Scenarios">
+  <div class="sec-head"><span class="sec-no">22</span><h2>出问题时会怎样？</h2><p>只写源码里真的有实作的反应。</p></div>
+  <div class="cards" id="failCards"></div>
+</section>
+
+<!-- 23 -->
+<section id="s23" data-title="已知限制">
+  <div class="sec-head"><span class="sec-no">23</span><h2>目前我们知道还有什么可以改善？</h2><p>严重程度是「技术评估」，依据是源码行为与 repository 里的测试纪录。</p></div>
+  <div class="cards" id="limitCards"></div>
+</section>
+
+<!-- 24 -->
+<section id="s24" data-title="可以改什么">
+  <div class="sec-head"><span class="sec-no">24</span><h2>哪些东西可以改？</h2><p>给客户的选单。难度与风险是技术评估。所有改动上线前都需要重新做测试通话。</p></div>
+  <div class="cards" id="changeCards"></div>
+</section>
+
+<!-- 25 -->
+<section id="s25" data-title="客户确认">
+  <div class="sec-head"><span class="sec-no">25</span><h2>你想改什么？</h2><p>勾选想调整的项目，写下意见，按「生成修改意见」，再复制贴给我们。这个页面不会把资料传到任何地方。</p></div>
+  <form class="review" id="reviewForm" autocomplete="off">
+    <div class="cols" id="reviewItems"></div>
+    <div class="cols">
+      <div><label for="rv-name">你的名字（可选）</label><input type="text" id="rv-name"></div>
+      <div><label for="rv-prio">最优先要处理的是？（可选）</label><input type="text" id="rv-prio"></div>
+    </div>
+    <div class="toolbar"><button type="submit" class="primary">生成修改意见</button><button type="button" id="rv-copy">复制</button><button type="button" id="rv-clear">清空</button><span class="toast" id="rv-toast" aria-live="polite"></span></div>
+    <div class="rv-out"><label for="rv-out">修改意见（可直接复制）</label><textarea id="rv-out" readonly></textarea></div>
+  </form>
+  <figure>
+    <div class="flow" aria-label="客户修改意见流程">
+      <div><b>勾选与填写</b><small>只在你的浏览器</small></div>
+      <div><b>生成文字</b><small>结构化清单</small></div>
+      <div><b>复制发送</b><small>WhatsApp / 电邮</small></div>
+      <div class="hl"><b>我们评估</b><small>难度、风险、测试</small></div>
+      <div><b>确认范围</b><small>再开始修改</small></div>
+    </div>
+    <figcaption>图 · 客户回馈流程。没有公开的写入接口，所以不会有资料外泄或被乱写的风险。</figcaption>
+  </figure>
+</section>
+
+<!-- 26 -->
+<section id="s26" data-title="Technical Appendix">
+  <div class="sec-head"><span class="sec-no">26</span><h2>Technical Appendix</h2><p>给开发者。设定名称只列名称，不含任何值。</p></div>
+  <h3>重要源码文件</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>文件</th><th>负责</th></tr></thead>
+    <tbody id="fileRows"></tbody>
+  </table></div>
+  <h3>Model / provider 对照</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>用途</th><th>Provider</th><th>模型 / 版本</th><th>关键参数</th></tr></thead>
+    <tbody>
+      <tr><td>STT</td><td>Groq</td><td class="mono">whisper-large-v3</td><td class="mono">language=zh, detect_language=False, verbose_json, max_retry=0</td></tr>
+      <tr><td>VAD</td><td>Silero（本地）</td><td class="mono">livekit-plugins-silero 1.6.10</td><td class="mono">SDK defaults</td></tr>
+      <tr><td>端点</td><td>LiveKit</td><td class="mono">inference.TurnDetector()</td><td class="mono">min_delay=0.2, max_delay=0.8</td></tr>
+      <tr><td>主模型</td><td>OpenAI</td><td class="mono">gpt-5.4-mini</td><td class="mono">reasoning_effort=none, verbosity=low, max_completion_tokens=128</td></tr>
+      <tr><td>告别句</td><td>OpenAI</td><td class="mono">gpt-4o-mini</td><td class="mono">timeout=2.0, max_retry=0, temperature=0.2</td></tr>
+      <tr><td>TTS</td><td>Fish Audio</td><td class="mono">s2.1-pro-free</td><td class="mono">mp3, 44100 Hz, speed=1.05, temperature=0.25, top_p=0.5, latency=balanced</td></tr>
+      <tr><td>未使用</td><td>OpenRouter</td><td class="mono">dolphin-mistral-24b-venice-edition, llama-3.1-8b-instruct</td><td class="mono">client constructed, never invoked in charity path</td></tr>
+    </tbody>
+  </table></div>
+  <h3>设定名称（无值）</h3>
+  <p class="mono" style="font-size:12.5px;max-width:none;overflow-wrap:anywhere">APP_ENV · PREPROD_COMPANY_ID · PREPROD_MAX_CONCURRENCY · PREPROD_MAX_CALLS_PER_DAY · KELLY_WORKER_SECRET · POSTGRES_HOST/PORT/DB/USER/PASSWORD · JWT_SECRET/ISSUER/AUDIENCE · PUBLIC_ORIGIN · PUBLIC_HOST · KELLY_BACKEND_URL · KELLY_BACKEND_INTERNAL · KELLY_OUTBOX_DIR · KELLY_AGENT_NAME · KELLY_SIP_TRUNK_ID · KELLY_VOICE_REFERENCE_ID · KELLY_DISPATCH_PYTHON · LIVEKIT_URL/API_KEY/API_SECRET · GROQ_API_KEY · OPENAI_API_KEY · OPENROUTER_API_KEY · FISH_AUDIO_API_KEY · HYBRID_BACKCHANNEL_MODE · S3_* · BACKEND_IMAGE · ADMIN_IMAGE · KELLY_IMAGE</p>
+  <p class="note">固定执行旗标（由 launcher 写入）：USE_GROQ_STT=1、STT_LANGUAGE=zh、STT_DETECT_LANGUAGE=0、USE_FISH_AUDIO_TTS=1、FISH_AUDIO_TAGS=1、ENABLE_ANSWER_DETECTION=0、MID_SPEECH_BACKCHANNELS=1、DISABLE_AMBIENCE=0。</p>
+  <h3>Worker → Backend 事件类型</h3>
+  <p class="mono" style="font-size:12.5px;max-width:none">DIALING · ANSWERED · heartbeat · transcript_turn · opt_out · whatsapp_handoff · runtime_error · finalize(COMPLETED | NO_ANSWER | BUSY | REJECTED | FAILED | CANCELLED | UNKNOWN)</p>
+  <h3>SIP 结果对照</h3>
+  <p class="mono" style="font-size:12.5px;max-width:none">408 / 480 → NO_ANSWER · 486 / 600 → BUSY · 603 → REJECTED · 其他 4xx–6xx → FAILED · 没有 SIP 代码 → UNKNOWN</p>
+  <h3>审计中发现、但本次没有修改的问题</h3>
+  <ul class="clean" id="bugList"></ul>
+  <p class="note">不在 Kelly production 范围：repository 里另有独立的房地产 demo 系统（demo-api / demo-ui / property worker）和更早的 Asterisk + ElevenLabs 拨号路径，本页不描述。</p>
+</section>
+
+<footer>
+  <p>依据：HALODIAL production 源码包（Kelly 慈善外呼，2026-09-22 快照）及 repository 内的 UAT 纪录。本页为静态文件，不连接任何 HALODIAL 服务，不含 API key、密码、客户资料、录音或对话内容。</p>
+  <p>编制日期：2026-10-04 · 本页内容如与源码不一致，以源码为准。</p>
+</footer>
+</main>
+</div>
+
+<script>
+(function(){
+const T={v:'已验证',code:'代码确认',cfg:'配置确认',test:'测试确认',unk:'未确认',hist:'历史配置',off:'目前下线',adj:'可调整',impl:'IMPLEMENTED',part:'PARTIAL',none:'NOT IMPLEMENTED',eval:'技术评估'};
+const tag=(k,txt)=>'<span class="tag '+k+'">'+(txt||T[k])+'</span>';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- section index ---------- */
+const secs=[...document.querySelectorAll('main section[id]')];
+const items=secs.map(s=>'<li><a href="#'+s.id+'"><span>'+s.id.slice(1)+'</span><span>'+esc(s.dataset.title)+'</span></a></li>').join('');
+document.getElementById('rail').innerHTML=items;document.getElementById('tocm').innerHTML=items;
+if('IntersectionObserver' in window){
+  const links=[...document.querySelectorAll('#rail a')];
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+e.target.id));}});},{rootMargin:'-20% 0px -70% 0px'});
+  secs.forEach(s=>io.observe(s));
+}
+
+/* ---------- tech toggle ---------- */
+const tb=document.getElementById('toggleTech');
+tb.addEventListener('click',()=>{const on=tb.getAttribute('aria-pressed')!=='true';tb.setAttribute('aria-pressed',on);tb.textContent=on?'收起全部技术细节':'展开全部技术细节';document.querySelectorAll('details.tech').forEach(d=>d.open=on);});
+
+/* ---------- 02 call journey ---------- */
+const STAGES=[
+ {g:'准备',n:'活动开始，联系人排队',h:'公司管理员在后台按「开始」，活动里的联系人进入排队。',t:'tasks.status=running、campaigns.status=active、task_recipients.status=queued；executor 必须是 kelly。',w:'先有明确的「谁可以打」，派工器才不会乱挑。',tags:['code']},
+ {g:'准备',n:'派工器挑人并开工单',h:'派工器每秒检查一次，挑最早排队、合法可以打的一位，开一张工单。',t:'kelly-dispatcher.ts → KellyJobs.prepare()：锁 kelly_dispatch_control，检查暂停/并发/每日上限/勿扰/重复号码，建立 call_attempts（queued）与 call_jobs（DISPATCHING，90 秒领取期限，一次性密钥只存杂凑）。',w:'集中在数据库交易里检查，两个程序同时跑也不会把同一个人打两次。',tags:['code']},
+ {g:'准备',n:'请 LiveKit 派一个 Kelly',h:'派工器请 LiveKit 叫一个空闲的 Kelly worker 来处理这张工单。',t:'kelly_dispatch.py：agent_dispatch.create_dispatch(agent_name, room=kelly-prod-<uuid>, metadata={job_id, call_id, environment, credential})，25 秒超时，不重试。',w:'worker 可以有多个，LiveKit 负责把工作分下去。',tags:['code']},
+ {g:'准备',n:'Worker 领取工单（claim）',h:'Kelly 先跟后台确认：「这张工单是我的」。后台再检查一次所有条件。',t:'production_job.claim()：POST 内部 claim 接口，一次请求、失败不重试；后台在交易内核对密钥、期限、活动/公司状态、勿扰、并发、同号码，再改成 CLAIMED 并绑定 worker_id。',w:'从排队到领取之间情况可能变了（例如客户刚被加进勿扰），所以要再查一次。',tags:['code']},
+ {g:'拨号',n:'后台批准拨号（DIALING）',h:'拨号前，Kelly 先把「我要拨了」写进后台，后台确认收到才拨。',t:'before_dial()：DIALING 事件写入本地寄件箱并立刻重送；后台没确认就以 DIAL_AUTHORIZATION_UNCONFIRMED 结束，不拨号。',w:'后台一定要知道「这通电话已经打出去」，否则断线后可能重复拨打同一个人。',tags:['code']},
+ {g:'拨号',n:'SIP 外呼，客户电话响',h:'系统透过电话线路拨出，客户的手机开始响，最多响 20 秒。',t:'ring_timeout.await_answer()：CreateSIPParticipantRequest(sip_trunk_id, participant_identity="customer", wait_until_answered=True, ringing_timeout=20s)，传输超时 30 秒，failover 关闭。',w:'等到真的接通才启动 AI，没人接就不浪费任何 AI 费用。',tags:['code']},
+ {g:'拨号',n:'没接 / 占线 / 拒接',h:'没人接、占线或被挂断，这通就结束并记录原因。',t:'408/480→NO_ANSWER，486/600→BUSY，603→REJECTED，其他 4xx–6xx→FAILED，无代码→UNKNOWN；删除房间、finalize、关闭 job。没有自动重拨。',w:'清楚的结果代码，后台才看得懂为什么没打通。',tags:['code']},
+ {g:'接通',n:'接听，开始 heartbeat',h:'客户接了！后台收到「已接通」，Kelly 开始每 15 秒报平安。',t:'answered()：ANSWERED 事件 + 启动 15 秒 heartbeat 迴圈。语音答录机侦测（AMD）代码存在但旗标关闭，所以不会分辨真人和留言信箱。',w:'heartbeat 让后台知道这通还活着；worker 当掉时后台 120 秒后就会发现。',tags:['code']},
+ {g:'接通',n:'建立语音 session',h:'接通后才把听写、AI、声音这些零件接上，开始一通对话。',t:'AgentSession(stt=Groq, llm=gpt-5.4-mini, tts=Fish, vad=Silero, turn_detection=TurnDetector, preemptive_tts=True)；附加对话纪录器、WhatsApp 跟进追踪器。',w:'接通前不建立，没接的电话不会产生 AI 费用。',tags:['code']},
+ {g:'接通',n:'Kelly 开场：「哈咯？」',h:'Kelly 先说很短的「哈咯？」。这句不能被打断。之后才开始播背景办公室声。',t:'session.say(welcome_greeting, allow_interruptions=False)；播完才启动聆听声、等待声控制器与背景音轨（ambience 0.25、typing 0.15）。',w:'电话刚接通常有杂音，若可被打断，杂音会把开场切掉。',tags:['code','cfg']},
+ {g:'对话迴圈',n:'客户讲话（VAD）',h:'系统侦测到客户在讲话；讲得久（4 秒、14 秒）会轻轻「嗯哼」一声表示在听。',t:'Silero VAD 分段；ListenerBackchannels：说话满 4 秒最多 1 次、满 14 秒最多 2 次，冷却 8 秒，播 Kelly 真人录音。',w:'真人在电话里听人讲很久会出声回应，完全安静会让人以为断线。',tags:['code']},
+ {g:'对话迴圈',n:'确认讲完（端点）',h:'客户停下来，系统再等一下，确认是真的讲完，不是喘口气。',t:'静音 ≥ 0.55 s 结束 VAD 段；TurnDetector 端点等待 0.2–0.8 s。',w:'太快会抢话，太慢会冷场。',tags:['code']},
+ {g:'对话迴圈',n:'等待声（bridge filler）',h:'如果 AI 还没准备好回答，Kelly 会先出一声「嗯～」或「呃～」，像真人在想。',t:'kelly_bridge.Bridge：客户转为 listening 后 0.30 s（8 秒内用过则 0.65 s）才播；回复已就绪就取消；最晚 0.8 s 内要开始，否则放弃；开始了就不切断，回复排在后面。',w:'盖住 AI 思考的空白，但回答已经好了就不多此一举。',tags:['code','test']},
+ {g:'对话迴圈',n:'STT 听写',h:'整段客户的话送去 Groq 写成文字。',t:'groq_segment_binding.BoundStream → VerboseGroqSTT（whisper-large-v3, zh, verbose_json），每段一个请求，max_retry=0。',w:'AI 只看得懂文字。',tags:['code']},
+ {g:'对话迴圈',n:'听写关卡（防幻听）',h:'挡掉 Whisper 自己生出来的字（例如「谢谢观看」），合并重复句子。',t:'kelly_stt_admission.rejection_reason()：已知片尾、来源标签、每段 no_speech_prob + avg_logprob 组合门槛；_collapse_duplicated_utterance()。',w:'没讲话却「听到」一句，AI 会对着空气回答。',tags:['code']},
+ {g:'对话迴圈',n:'控制类判断',h:'先看是不是特别情况：要挂电话、不要再打、等一下、喂你还在吗、我有问题。这些由程序直接处理，不问 AI。',t:'classify_stop_request()、_is_closing_turn/_is_hold_on_request/_is_attention_check/_is_question_preface/decline/no-time → 固定句或结束流程（StopResponse）。',w:'挂电话、勿扰这种关键动作不能交给模型自由发挥。',tags:['code']},
+ {g:'对话迴圈',n:'组合对话内容',h:'一般对话就把 Kelly 的设定、批准资料、场景答法和最近的对话一起交给 AI。',t:'conversation_first.node()：system = 指令 + 电话情境 + 批准事实 + 风格示例 + 13 场景 + 跟进状态；加最近 24 条讯息；end_call 工具被拿掉。',w:'AI 只能根据给它的资料回答，资料越清楚越不会乱讲。',tags:['code']},
+ {g:'对话迴圈',n:'LLM 生成回复',h:'GPT-5.4-mini 写出 Kelly 要讲的一两句话。',t:'openai.LLM(gpt-5.4-mini, reasoning none, verbosity low, max 128 tokens) 串流；preemptive generation 可在转写确认前先起草，内容不符就丢掉。',w:'小而快的模型，适合即时电话。',tags:['code']},
+ {g:'对话迴圈',n:'回复关卡 + 所有权',h:'整句写好后先检查：有没有乱讲资料、乱答应事情。也检查这句是不是「已过期」的回答（客户已经又讲了别的）。',t:'checked_reply() + kelly_business.hard_reason()；_reply_guard 比对 reply epoch、业务是否已停止、结束状态、被接受的输入 ID；不合格 → 同模型修 1 次（8 s）→ 再不行礼貌结束。',w:'迟到的旧答案或违规内容，绝不能播给客户。',tags:['code']},
+ {g:'对话迴圈',n:'TTS 合成 Kelly 的声音',h:'整句交给 Fish Audio，用 Kelly 的参考声音读出来。',t:'tts_node：整句缓冲 → fish_audio_tts（s2.1-pro-free, mp3 44.1 kHz）→ 文字修整（您→你等）→ 重采样；等待声还在播就排队等它播完。',w:'整句一次合成，声音才不会一句高一句低。',tags:['code']},
+ {g:'对话迴圈',n:'播放与插话',h:'Kelly 开始讲。客户如果插话超过 0.5 秒，Kelly 马上停，不补播。',t:'interruption min_duration 0.5、resume_false_interruption False；客户开口时等待声取消、reply epoch +1、待修回复取消。',w:'真人被打断会停下来听，不会继续念完。',tags:['code']},
+ {g:'对话迴圈',n:'下一轮',h:'回到「客户讲话」，一直循环到电话结束。每一句对话都即时写进后台。',t:'conversation_item_added → transcript_turn 事件 → kelly_transcript_turns + transcripts。',w:'就算通话中断，已讲的内容也已经存下。',tags:['code']},
+ {g:'收尾',n:'跟进与勿扰登记',h:'客户愿意收资料，Kelly 确认 WhatsApp 号码；客户说不要再打，就登记勿扰。',t:'kelly_handoff.Handoff（规则状态机）→ whatsapp_handoff 事件；classify_stop_request=do_not_contact → opt_out 事件 → company_suppression_list + leads.consent_status=opted_out。',w:'同意要有证据（哪一句话），勿扰要真的存进名单。',tags:['code']},
+ {g:'收尾',n:'告别与主动挂线',h:'Kelly 讲一句告别，确认播完（或客户先挂），系统主动结束通话。',t:'_start_end_execution()：中断所有旧语音 → 不可打断的告别句 → 等播完或客户离线 → 一次 delete_room（5 s，不重试）→ session.shutdown。12 秒后备计时器。',w:'不能把客户晾在线上，也不能话讲到一半就挂。',tags:['code']},
+ {g:'收尾',n:'写回数据库（finalize）',h:'后台收到最后结果：完成、失败或不确定，心跳停止，名额释放。',t:'finalize：COMPLETED / FAILED / UNKNOWN（结束未确认时）；更新 call_jobs、call_attempts、task_recipients；UNKNOWN 继续占名额并标记 review_required。',w:'结果不确定时宁可标「不确定」给人看，也不假装成功。',tags:['code']},
+ {g:'收尾',n:'后台可见',h:'公司管理员在 Calls、Follow-ups、Do Not Call 页面看到这通电话的一切。',t:'workspace /calls、/follow-ups、/dnc；号码只显示末 4 码；Kelly 没有录音。',w:'工作人员靠这里决定谁要跟进。',tags:['code']},
+];
+const stepsEl=document.getElementById('steps'),det=document.getElementById('stepDetail');
+let lastG='',html='';
+STAGES.forEach((s,i)=>{if(s.g!==lastG){html+='<li class="grp" aria-hidden="true">'+s.g+'</li>';lastG=s.g;}
+ html+='<li><button type="button" role="tab" id="st'+i+'" aria-selected="false" data-i="'+i+'"><span class="k">'+String(i+1).padStart(2,'0')+'</span><span>'+esc(s.n)+'</span></button></li>';});
+stepsEl.innerHTML=html;
+function show(i){const s=STAGES[i];
+ stepsEl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',b.dataset.i==i));
+ det.innerHTML='<div class="eyebrow">阶段 '+String(i+1).padStart(2,'0')+' / '+STAGES.length+' · '+s.g+'</div><h3>'+esc(s.n)+'</h3><div class="tags">'+s.tags.map(k=>tag(k)).join('')+'</div><div class="tri"><div><span class="lb h">人话</span><p>'+esc(s.h)+'</p></div><div><span class="lb t">技术</span><p class="note" style="color:var(--ink)">'+esc(s.t)+'</p></div><div><span class="lb w">为什么</span><p>'+esc(s.w)+'</p></div></div><div class="navpair"><button type="button" data-go="'+(i-1)+'" '+(i===0?'disabled':'')+'>← 上一步</button><button type="button" class="primary" data-go="'+(i+1)+'" '+(i===STAGES.length-1?'disabled':'')+'>下一步 →</button></div>';
+ det.setAttribute('aria-labelledby','st'+i);}
+stepsEl.addEventListener('click',e=>{const b=e.target.closest('button');if(b)show(+b.dataset.i);});
+det.addEventListener('click',e=>{const b=e.target.closest('button[data-go]');if(b&&!b.disabled){const i=+b.dataset.go;show(i);document.getElementById('st'+i).scrollIntoView({block:'nearest'});}});
+show(0);
+
+/* ---------- 08 natural conversation ---------- */
+const NAT=[
+ ['等待声（bridge filler）','客户讲完、AI 还没准备好时，Kelly 先出「嗯～」「呃～」。0.3 秒后才播（刚用过就等 0.65 秒），回答已经好了就不播；0.8 秒内没开始就放弃；不会连续用同一个；一旦开始就播完，回答排在后面。只有 3 个中性录音，不按语义挑选。',['code','test']],
+ ['聆听声（嗯哼 / 嗯）','客户讲很久时，Kelly 轻轻回应表示在听：讲满 4 秒最多一次，满 14 秒最多两次，两次之间至少 8 秒。用真人录音，不经 AI。播放时客户的话照样被完整收音，不会漏掉。',['code']],
+ ['什么时候不出声','客户正在插话、Kelly 自己在讲、通话正在结束、或回答已经就绪，等待声和聆听声都会取消。旧版「每轮都加一句填充话」在 Kelly 版本已关闭（completed_turn_fillers=false）。',['code']],
+ ['「喂？你还在吗？」','客户只说「喂 / hello / 在吗 / 听得到吗」：如果 Kelly 还没正式介绍，就讲完整开场；如果介绍被打断了，就讲一句短的重新介绍；已经在聊天了，就说「在，我听着，你说。」',['code']],
+ ['「等一下」','客户说「等下 / wait / hold on」，Kelly 回「好，我先停，你讲。」然后等。不会把它当成客户没兴趣。',['code']],
+ ['「我有个问题」','客户先说「我想问一下」，Kelly 回「可以，你问。」，不抢着猜问题。',['code']],
+ ['插话（barge-in）','客户开口超过 0.5 秒，Kelly 立刻停。被打断的那句不会恢复播放（以前恢复播放会出现重复片段，所以关掉了）。',['code']],
+ ['过期回答保护','每一次客户开口都会让「回复编号」+1。AI 写好的答案在播出前要核对编号，如果客户已经又讲了新的话，旧答案直接丢掉。',['code']],
+ ['回答所有权','系统可以在转写确认前先起草回答（加快速度）；只有当草稿对应的就是最终确认的那句话，才会被采用，否则作废。',['code']],
+ ['修正与恢复（repair）','回答被关卡拒绝，用同一个模型、附上拒绝原因重写一次（8 秒内）。再失败，Kelly 说「不好意思，我这边回复出了问题，没办法继续这通对话，我先结束通话。」然后结束。',['code']],
+ ['迟到的转写','如果同一段话的转写在 Kelly 开口后才到，只修正纪录，不会再回答一次。',['code']],
+ ['背景声','办公室环境声（音量 0.25）和 AI 思考时的打字声（0.15），让电话听起来像在办公室。',['code','cfg']],
+];
+document.getElementById('naturalCards').innerHTML=NAT.map(([h,p,t])=>'<div class="card"><h3>'+esc(h)+'</h3><p>'+esc(p)+'</p><div class="tags">'+t.map(k=>tag(k)).join('')+'</div></div>').join('');
+
+/* ---------- 09 guards ---------- */
+const GUARDS=[
+ ['STT 防幻听关卡','impl','已知幻听句、来源标签、低信心片段会被丢掉，不交给 AI。'],
+ ['重复句合并','impl','Whisper 把一句话写两次时自动合成一句。'],
+ ['批准事实边界','impl','提示词规定事实只能来自批准资料；资料没写的不能补。（靠模型遵守）'],
+ ['回复关卡：未批准事实','impl','提到免税、注册号、政府批准、银行帐号、捐款金额等，会被拦下重写。'],
+ ['回复关卡：经济利益','impl','声称 Kelly 从捐款赚佣金或利润，会被拦下。'],
+ ['回复关卡：号码来源','impl','编造号码来源（例如来自某名单或数据库）会被拦下；只准用批准的「慈善团体推荐」说法。'],
+ ['回复关卡：探访安排','impl','说「随时都可以来」或「我帮你安排探访时间」会被拦下。'],
+ ['回复关卡：住民数量','impl','把「部分住民」讲成「很多/大部分住民」会被拦下。'],
+ ['回复关卡：具体物资','impl','编出中心需要哪些具体物品或用途会被拦下。'],
+ ['回复关卡：假装已发送','impl','声称已经/马上/自动发 WhatsApp、发定位、保证时间联络，会被拦下。'],
+ ['不收款','impl','没有任何付款、转帐流程；「payment / transfer / booking」列为不可用能力，提示词也禁止索取捐款。'],
+ ['WhatsApp 只做人工跟进','impl','只登记同意与号码，由真人之后联系；系统本身不会发送任何讯息。'],
+ ['过期回答 / 所有权保护','impl','客户又讲新话后，旧答案不会播出。'],
+ ['挂电话只由程序决定','impl','一般回合 AI 拿不到挂电话工具，避免把一句「好的」误判为结束。'],
+ ['勿扰（Do Not Call）','impl','客户明确说不要再打，登记到公司勿扰名单并把联系人标记为退出；派工与领取都会检查。'],
+ ['AI 身份诚实','part','客户问起必须承认是 AI 辅助来电（提示词要求）；没有程序层的强制检查，也不会主动说明。'],
+ ['通话阶段提示','part','charity_contract.guidance() 已写好，但没有接进提示词。'],
+ ['语音信箱侦测（AMD）','none','代码存在但旗标关闭，Kelly 可能对着留言信箱讲话。'],
+ ['回复关卡的语义理解','none','关卡是有限的规则清单，不能理解所有说法；没写到的违规说法仍可能播出。'],
+ ['隐私：号码遮蔽','impl','后台通话列表只显示号码末 4 码；production 日志会自动遮蔽长串数字与密钥。'],
+ ['录音','none','Kelly 不录音（也就没有录音外泄风险）。'],
+ ['真实世界事实核实','unk','中心资料由营运方批准，本文件没有独立核实。'],
+];
+document.getElementById('guardRows').innerHTML=GUARDS.map(([a,s,b])=>'<tr><td><b>'+esc(a)+'</b></td><td>'+tag(s)+'</td><td>'+esc(b)+'</td></tr>').join('');
+
+/* ---------- 11 states ---------- */
+const STATES={
+ QUEUED:'联系人在 task_recipients 里排队（queued）。call_jobs 的 schema 也有 QUEUED，但派工器建立工单时直接从 DISPATCHING 开始。',
+ DISPATCHING:'工单已建立、已请 LiveKit 派工，等待 worker 在 90 秒内领取。派工被拒 → FAILED；派工结果不确定 → UNKNOWN；可被取消 → CANCELLED。',
+ CLAIMED:'worker 已用一次性密钥领取，后台绑定 worker 身份。下一步要先回报 DIALING 才可拨号。',
+ DIALING:'后台已批准拨号，SIP 正在呼叫，最多响 20 秒。',
+ ANSWERED:'客户接听，heartbeat 开始（每 15 秒）。逐句对话、勿扰、跟进事件只在这个状态之后才收。',
+ COMPLETED:'通话正常结束，而且确认电话已挂断。名额释放。',
+ CANCELLED:'拨号前被取消。',
+ FAILED:'确定失败：派工被拒、SIP 失败、运行错误等。名额释放，不会自动重打。',
+ UNKNOWN:'结果不确定（例如 worker 失联超过 120 秒、挂线未确认、派工回应遗失）。名额继续占住并标记需要人工检查；源码中没有自动释放或后台按钮释放的路径。',
+ NO_ANSWER:'SIP 408 / 480：响铃 20 秒无人接。',
+ BUSY:'SIP 486 / 600：占线。',
+ REJECTED:'SIP 603：对方拒接。'
+};
+const sInfo=document.getElementById('stateInfo');
+function pickState(k){document.querySelectorAll('#stateSvg .st').forEach(g=>g.classList.toggle('on',g.dataset.k===k));sInfo.innerHTML='<b class="mono">'+k+'</b><p>'+esc(STATES[k])+'</p>';}
+document.querySelectorAll('#stateSvg .st').forEach(g=>{g.addEventListener('click',()=>pickState(g.dataset.k));g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pickState(g.dataset.k);}});});
+pickState('ANSWERED');
+
+/* ---------- 15 entities ---------- */
+const ENT=[
+ ['companies','每个客户机构一笔（租户）。状态、录音保留天数设定。'],['users','后台帐号：角色（super_admin / company_admin / user）、所属公司、是否启用。密码只存加密后的值。'],
+ ['voice_agents','可用的语音 agent，例如 Kelly，对应 worker 的执行名称。'],['company_voice_agents','哪个公司被分配到哪个 agent。'],
+ ['campaigns','外呼活动：名称、状态、执行方式（kelly）、并发上限、用途（正式 / 测试）。'],['leads','联系人：号码（E.164）、名字、偏好语言、同意状态、是否封存。'],
+ ['tasks','活动的一次执行批次与要求的并发数。'],['task_recipients','批次里每位联系人的排队状态、尝试次数、最后结果。'],
+ ['call_jobs','Kelly 每通电话的工单：状态、worker 身份、心跳时间、结果代码、是否需要人工检查、是否占名额。'],['call_attempts','通话纪录：开始、接听、结束时间、通话秒数、失败原因。'],
+ ['call_events','所有事件的流水帐（每个事件有唯一 ID，防止重复写入）。'],['kelly_transcript_turns','逐句对话：谁讲的、讲什么、什么时候。'],
+ ['transcripts','整份对话文字（由逐句对话合成）。'],['whatsapp_handoffs','人工跟进：是否同意、WhatsApp 号码、是否等于来电号码、同意的那一句、工作人员处理状态与备注。'],
+ ['company_suppression_list','公司勿扰名单（opt_out / dnc / complaint）。'],['suppression_list','全局勿扰名单，任何公司都不会打。'],
+ ['kelly_dispatch_control','全局暂停开关（只有一列）。'],['preprod_service_heartbeats','worker、dispatcher 的服务就绪心跳。'],
+];
+document.getElementById('entityRows').innerHTML=ENT.map(([a,b])=>'<tr><td class="mono">'+a+'</td><td>'+esc(b)+'</td></tr>').join('');
+
+/* ---------- 19 providers ---------- */
+const PROV=[
+ ['LiveKit','SIP 外呼、实时音频房间、把工作派给 worker、端点判断模型。','媒体层（每通电话）','完全不能打电话。派工失败会被标为 FAILED 或 UNKNOWN。','难','整个语音框架都建在 LiveKit Agents 上，换掉等于重写 worker。',['code']],
+ ['SIP 线路商','真正把电话打到客户手机。','电话层','拨不出去，结果会是 SIP_FAILURE / UNKNOWN。','中','换 trunk 只是设定，但要重测号码显示、音质、接通率。',['unk']],
+ ['Groq','Whisper Large V3 听写。','STT','听不到客户：STT 出错时 session 直接结束，结果记为 UNKNOWN。','中','可以换其他 STT，但会影响幻听关卡（依赖 Groq 的 verbose 栏位）和延迟。',['code']],
+ ['OpenAI','GPT-5.4-mini 主模型；GPT-4o-mini 告别句。','LLM','无法回答：Kelly 会说回复出了问题并结束通话。告别句失败则用固定句。','中','模型可换，但提示词、关卡、长度设定都要重新调和测试。',['code']],
+ ['Fish Audio','用 Kelly 参考声音合成回复。','TTS','没有声音；没有备用 TTS。','中','声音是品牌的一部分，换 provider 等于换一个声音，需要重新挑选和试听。',['code']],
+ ['OpenRouter','旧版背景脑。Kelly 不调用。','启动检查','缺 key 时 worker 拒绝启动；通话中不受影响。','易','可以清理掉，但要改启动检查（属于程序修改）。',['hist']],
+ ['DigitalOcean（主机）','跑全部 Docker 容器的主机。','基础设施','整个系统离线（目前状态）。','易','单机 Docker Compose，可以搬到任何 Linux 主机。',['unk','off']],
+];
+document.getElementById('providerCards').innerHTML=PROV.map(([n,u,l,d,e,r,t])=>'<div class="card"><h3>'+esc(n)+'<span class="tags">'+t.map(k=>tag(k)).join('')+'</span></h3><dl><dt>用途</dt><dd>'+esc(u)+'</dd><dt>HALODIAL 哪一层</dt><dd>'+esc(l)+'</dd><dt>如果它 down</dt><dd>'+esc(d)+'</dd><dt>替换难度</dt><dd>'+esc(e)+'</dd><dt>替换风险</dt><dd>'+esc(r)+'</dd></dl></div>').join('');
+
+/* ---------- 20 stack ---------- */
+const STACK=[
+ ['Frontend / Admin','Next.js 15.5.24 · React 18 · TypeScript 5.9（standalone 输出）','code'],
+ ['Backend','Node.js 20.19.5 · Fastify 4 · TypeScript ESM · Zod','code'],
+ ['Database','PostgreSQL 15.19（postgres:15.19-bookworm）· pg 驱动 · 原生 SQL · 14 个 migration','code'],
+ ['Authentication','JWT（@fastify/jwt）· bcryptjs · 每请求重新核对身份','code'],
+ ['Voice Runtime','Python 3.13.7 · livekit-agents 1.6.10 · livekit 1.1.14 · livekit-api 1.2.0','code'],
+ ['Telephony','LiveKit SIP 外呼（create_sip_participant，wait_until_answered）· SIP trunk（线路商未确认）','code'],
+ ['Media','LiveKit 房间（WebRTC）· 第二音轨背景音','code'],
+ ['VAD','Silero（livekit-plugins-silero 1.6.10）+ LiveKit TurnDetector','code'],
+ ['STT','Groq whisper-large-v3（livekit-plugins-groq 1.6.10 + 自订 verbose 解析）','code'],
+ ['LLM','OpenAI gpt-5.4-mini（livekit-plugins-openai 1.6.10，openai 2.54.0）','code'],
+ ['TTS','Fish Audio s2.1-pro-free（自写 HTTP 转接器，httpx 0.28.1）','code'],
+ ['Reverse Proxy','Caddy 2.10.2-alpine · 自动 HTTPS · HSTS · 拦截内部路径','code'],
+ ['Containerization','Docker Compose · 7 个服务 · 6 个具名 volume · 非 root worker','code'],
+ ['Integrity','SHA-256 原始码与音档清单（建置与启动各核对一次）','code'],
+ ['Testing','后端合成资料测试（开发版文件记载 67 通过）· worker 音频格式/启动测试 · UAT 测试通话纪录','test'],
+ ['Deployment','手动 Docker Compose（文件记载）；此包是否接 CI/CD 未确认','unk'],
+ ['Monitoring / logging','结构化日志（自动遮蔽密钥与号码）· /health · /ready · 服务心跳；无外部监控服务','code'],
+ ['Hosting','单台云主机（用户说明为 DigitalOcean，已关闭）','off'],
+];
+document.getElementById('stackRows').innerHTML=STACK.map(([a,b,s])=>'<tr><td><b>'+esc(a)+'</b></td><td>'+esc(b)+'</td><td>'+tag(s)+'</td></tr>').join('');
+
+/* ---------- 21 bars (0–5 s scale) ---------- */
+const BARS=[
+ ['STT 请求 → 回应',354,456,'test'],
+ ['TTS 请求 → 回应开始',390,530,'test'],
+ ['LLM 请求 → 第一个字',1124,2015,'hist'],
+ ['TTS 整段下载完',2640,4890,'test'],
+ ['讲完 → 声音来源就绪',2537,3198,'hist'],
+];
+const MAX=5000;
+document.getElementById('bars').innerHTML=BARS.map(([n,m,p,k])=>{const h=k==='hist';const mw=(m/MAX*100).toFixed(1),pw=(p/MAX*100).toFixed(1);const lbl=(m>=1000?(m/1000).toFixed(2)+' s':m+' ms')+' · P90 '+(p>=1000?(p/1000).toFixed(2)+' s':p+' ms');
+ return '<div class="bar"><span>'+esc(n)+' '+tag(k)+'</span><div class="track" role="img" aria-label="'+esc(n)+' 中位 '+lbl+'"><i class="'+(h?'histp':'p90')+'" style="width:'+pw+'%"></i><i class="'+(h?'hist':'')+'" style="width:'+mw+'%"></i><em class="'+(m<900?'out':'')+'" style="'+(m<900?'left:calc('+pw+'% + 8px)':'')+'">'+lbl+'</em></div></div>';}).join('');
+
+/* ---------- 22 failures ---------- */
+const FAIL=[
+ ['STT 听错','错的文字照样交给 AI。没有信心分数可以判断「听错」，只能靠 AI 自己察觉不合理时请客户再讲。关键字被听错（例如听成「拜拜」）可能直接触发结束。','part'],
+ ['STT 服务出错','不重试，session 立刻关闭。因为没有确认电话已挂断，结果记为 UNKNOWN，需要人工检查。','impl'],
+ ['LLM 慢','先有等待声「嗯～」与打字背景声盖住；SDK 连线最多重试 3 次（每次 10 秒上限）。没有「请稍等」之类的固定句。','part'],
+ ['LLM 出错 / 回复一直不合格','修 1 次（8 秒内）；仍失败就说「我这边回复出了问题…先结束通话」，然后主动挂线。','impl'],
+ ['TTS 慢或出错','连线 15 秒 / 读取 30 秒超时；没有备用声音引擎。错误会记录为 runtime_error。客户实际听到什么（静音多久）未测量。','part'],
+ ['客户插话','超过 0.5 秒就停，不补播，新的一句重新处理。','impl'],
+ ['客户一直不出声','源码中没有找到 Kelly 专属的「沉默提醒」或「沉默挂线」逻辑；SDK 预设行为未确认。','unk'],
+ ['背景噪音','开场「哈咯？」不能被打断；防幻听关卡挡掉部分杂音转写。噪音仍可能被 VAD 当成讲话，触发插话或聆听声。','part'],
+ ['SIP 失败','按 SIP 代码分类（没接 / 占线 / 拒接 / 失败 / 不确定），删房间、写结果，不自动重拨。','impl'],
+ ['Worker 重启','进行中的通话以 UNKNOWN 结束；未送出的事件留在寄件箱档案，重启后继续重送；后台 120 秒后把没心跳的工单标为 UNKNOWN。','impl'],
+ ['Dispatcher 失去所有权','工单密钥只能领取一次、事件要同一个 worker 身份；派工结果不确定就标 UNKNOWN 并占住名额，绝不重新排队。','impl'],
+ ['数据库不可用','Backend 回 503；worker 寄件箱每 2 秒重送；拨号前的 DIALING 必须被确认，所以数据库挂了就不会拨新电话。','impl'],
+ ['语音信箱接听','AMD 关闭，Kelly 会当成真人照常开场，直到通话结束。','none'],
+];
+document.getElementById('failCards').innerHTML=FAIL.map(([a,b,s])=>'<div class="card"><h3>'+esc(a)+tag(s)+'</h3><p>'+esc(b)+'</p></div>').join('');
+
+/* ---------- 23 limitations ---------- */
+const LIM=[
+ ['H','STT 准确度（马来西亚华语、短句、英巫混讲）','Groq Whisper 无中途字幕、无可靠信心分数；关键词误听可能导致误挂线。'],
+ ['H','UNKNOWN 工单会一直占住名额','并发预设只有 1 通；一张 UNKNOWN 工单就会让派工停住，源码中没有后台释放按钮，需要直接处理数据库。'],
+ ['H','没有语音信箱侦测','AMD 代码在但关闭；对着留言信箱讲话会浪费费用，也可能留下不完整的讯息。'],
+ ['M','回答速度','历史 UAT 中主模型首字中位约 1.1 秒、讲完到声音就绪中位约 2.5 秒；内部纪录也写着「短答仍慢」。'],
+ ['M','回复关卡是规则清单','能挡已知类型，不保证挡住所有不当说法；没有语义层检查。'],
+ ['M','使用量没有记录','worker 回报 usage=null，后台用量页没有真实数字，无法按通话算成本。'],
+ ['M','Persona 合规','AI 以第一人称讲个人家庭背景；只在被问时承认是 AI。建议法律/合规确认。'],
+ ['M','可观测性','只有容器日志与心跳，没有外部监控、告警或通话品质仪表板；手机端真实延迟没有量测。'],
+ ['M','单一 provider、无备援','STT、LLM、TTS 各只有一家，任一家出事通话就受影响。'],
+ ['L','端点设定未完整验证','0.8 秒端点等待在源码注释中标明尚未经真实通话验证。'],
+ ['L','英文夹杂发音','没有发音字典，英文单字由 Fish 自行处理，未系统测试。'],
+ ['L','残留依赖','需要 OpenRouter key 才能启动但完全不用；Cartesia/MiniMax/本地 TTS 代码仍在。'],
+ ['L','没有录音','有利隐私，但出问题时无法回放检查，只能看文字纪录。'],
+];
+document.getElementById('limitCards').innerHTML=LIM.map(([s,a,b])=>'<div class="card"><h3>'+esc(a)+'<span class="sev '+s+'">'+({H:'HIGH',M:'MEDIUM',L:'LOW'})[s]+'</span></h3><p>'+esc(b)+'</p><div class="tags">'+tag('eval')+'</div></div>').join('');
+
+/* ---------- 24 changes ---------- */
+const CHG=[
+ ['🎙 声音','Fish Audio 的一个参考声音，语速 1.05，语气偏放松。','换参考声音、语速、语气标签；重录「嗯～」「嗯哼」等真人片段。','整体形象、亲切感；新声音的英文发音和稳定度要重新确认。','易','中','是'],
+ ['🧠 AI 模型','OpenAI GPT-5.4-mini，不做长思考，最多 128 tokens。','换模型或调整长度、思考程度。','回答品质、速度、费用；关卡和提示词可能要重新调。','中','中','是'],
+ ['👂 听写模型','Groq Whisper Large V3，锁定中文。','换 STT、调词汇表、改语言设定。','听懂率、速度；防幻听规则依赖目前的栏位。','中','高','是'],
+ ['🗣 讲话方式','马来西亚华语口语、短句、少量 English。','更正式、更活泼、更多/更少英文、句子长短。','客户观感；太长会更慢。','易','低','是'],
+ ['⏱ 回答速度','等待声 0.3 秒、端点 0.2–0.8 秒、整句检查后才发声。','调端点、调等待声时间、换更快的模型。','太快会抢话，太慢会冷场；先前尝试过的激进加速方案曾造成答非所问。','中','高','是'],
+ ['☎️ 电话流程','响 20 秒、不重拨、不侦测语音信箱。','响铃时间、重拨规则、开启 AMD。','接通率、费用、骚扰风险。','中','中','是'],
+ ['👋 开场白','「哈咯？」再完整介绍。','换开场句子、介绍顺序。','第一印象、挂线率。','易','低','是'],
+ ['💬 对话内容','13 个场景 + 批准中心资料。','增加/修改场景答法、补充批准资料。','能回答的问题范围；新事实需要营运方批准。','易','中','是'],
+ ['🛡 合规规则','回复关卡 + 提示词禁止事项。','增加禁说内容、调整 AI 身份说明方式。','安全性；规则太严可能让回答变得生硬。','中','中','是'],
+ ['📊 后台','公司工作区 + Master 控制中心。','新增报表、导出、用量统计（需先补用量回报）。','工作人员效率。','中','低','需测试后台'],
+ ['📞 并发数量','预设同时 1 通、每日 20 通。','提高上限（设定值）。','速度与费用；同时多通时的稳定性未验证。','易','高','是'],
+ ['📝 客户资料收集','只收 WhatsApp 同意与号码。','收集更多资料（例如姓名、偏好时间）。','隐私与合规责任增加；需要新的同意流程。','中','高','是'],
+ ['🔄 Follow-up 流程','后台登记，真人自己联系。','自动发 WhatsApp、接 CRM。','需要新的整合与官方 WhatsApp 帐号；目前完全没有自动发送。','难','高','是'],
+];
+document.getElementById('changeCards').innerHTML=CHG.map(([n,a,b,c,d,r,t])=>'<div class="card"><h3>'+esc(n)+tag('adj')+'</h3><dl><dt>目前是什么</dt><dd>'+esc(a)+'</dd><dt>可以改什么</dt><dd>'+esc(b)+'</dd><dt>改了会影响什么</dt><dd>'+esc(c)+'</dd><dt>难度 · 风险 · 需要重测</dt><dd>'+esc(d)+' · '+esc(r)+' · '+esc(t)+'</dd></dl></div>').join('');
+
+/* ---------- 25 review ---------- */
+const RV=['Kelly 声音','Kelly 讲话方式','开场白','AI 回答逻辑','STT（听写）','TTS（声音合成）','对话速度','电话流程','客户资料收集','Follow-up','Admin 后台','其他'];
+document.getElementById('reviewItems').innerHTML=RV.map((n,i)=>'<div class="rv-item"><label for="rv-c'+i+'"><input type="checkbox" id="rv-c'+i+'" data-i="'+i+'">'+esc(n)+'</label><textarea id="rv-t'+i+'" placeholder="想怎么改？例如：希望声音再成熟一点" hidden></textarea></div>').join('');
+const DRAFT_STORE='halodial-review-draft';
+const form=document.getElementById('reviewForm'),out=document.getElementById('rv-out'),toast=document.getElementById('rv-toast');
+function save(){try{const d={n:document.getElementById('rv-name').value,p:document.getElementById('rv-prio').value,c:RV.map((_,i)=>[document.getElementById('rv-c'+i).checked,document.getElementById('rv-t'+i).value])};localStorage.setItem(DRAFT_STORE,JSON.stringify(d));}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem(DRAFT_STORE)||'null');if(!d)return;document.getElementById('rv-name').value=d.n||'';document.getElementById('rv-prio').value=d.p||'';(d.c||[]).forEach(([c,t],i)=>{const cb=document.getElementById('rv-c'+i);if(!cb)return;cb.checked=c;const ta=document.getElementById('rv-t'+i);ta.value=t||'';ta.hidden=!c;});}catch(e){}}
+form.addEventListener('change',e=>{if(e.target.type==='checkbox'){const ta=document.getElementById('rv-t'+e.target.dataset.i);ta.hidden=!e.target.checked;if(e.target.checked)ta.focus();}save();});
+form.addEventListener('input',save);
+form.addEventListener('submit',e=>{e.preventDefault();const lines=['HALODIAL 修改意见',''];let k=1;
+ RV.forEach((n,i)=>{if(document.getElementById('rv-c'+i).checked){lines.push(k+'. '+n+'：'+(document.getElementById('rv-t'+i).value.trim()||'（未填写）'));k++;}});
+ if(k===1)lines.push('（还没有勾选任何项目）');
+ const p=document.getElementById('rv-prio').value.trim(),nm=document.getElementById('rv-name').value.trim();
+ if(p)lines.push('','最优先：'+p);if(nm)lines.push('','—— '+nm);
+ lines.push('','（参考：HALODIAL 系统蓝图，最后 production 架构）');out.value=lines.join('\n');toast.textContent='已生成，可以复制。';});
+document.getElementById('rv-copy').addEventListener('click',async()=>{if(!out.value){form.requestSubmit();}
+ try{await navigator.clipboard.writeText(out.value);toast.textContent='已复制到剪贴簿。';}catch(e){out.focus();out.select();toast.textContent='请按 Ctrl+C / 长按复制已选取的文字。';}});
+document.getElementById('rv-clear').addEventListener('click',()=>{form.reset();RV.forEach((_,i)=>document.getElementById('rv-t'+i).hidden=true);out.value='';toast.textContent='已清空。';try{localStorage.removeItem(DRAFT_STORE);}catch(e){}});
+load();
+
+/* ---------- 26 appendix ---------- */
+const FILES=[
+ ['voice-worker/production_launch.py','production 启动：检查必要设定、SDK 版本、SHA-256 清单，启动寄件箱重送，执行 agent.py'],
+ ['voice-agent/agent.py','session 组装：STT/LLM/TTS/VAD/端点/插话设定、开场、背景音、聆听声与等待声挂载'],
+ ['voice-agent/assistant.py','对话逻辑：控制类判断、挂电话执行器、修正/恢复、回复所有权、TTS 节点'],
+ ['voice-agent/conversation_first.py','慈善版主模型节点：组合 prompt、最近 24 条对话'],
+ ['voice-agent/kelly_business.py · charity_contract.py · conversation_reply.py','回复关卡规则'],
+ ['voice-agent/kelly_campaign.json · kelly_scenarios.json · content.py','Kelly 指令、批准事实、13 个场景、固定句'],
+ ['voice-agent/ring_timeout.py','SIP 外呼、20 秒响铃、SIP 结果分类'],
+ ['voice-agent/production_job.py · production_service.py','工单领取、事件寄件箱、心跳、服务就绪、日志遮蔽'],
+ ['voice-agent/groq_segment_binding.py · kelly_groq_stt.py · kelly_stt_admission.py','STT 分段、请求、防幻听'],
+ ['voice-agent/phone_turn_context.py','电话情境提示、开场恢复、迟到转写保护'],
+ ['voice-agent/kelly_bridge.py · kelly_human_cues.py · listener_backchannels.py','等待声与聆听声'],
+ ['voice-agent/fish_audio_tts.py · audio_format.py','Fish Audio 转接器、重采样'],
+ ['voice-agent/stop_requests.py · kelly_handoff.py','结束/勿扰判断、WhatsApp 同意状态机'],
+ ['backend-api/src/kelly-jobs.ts · kelly-executor.ts · scripts/kelly-dispatcher.ts','工单状态机、派工、事件写入、超时处理'],
+ ['backend-api/src/routes/workspace.ts · master.ts · preprod.ts','公司工作区、Master、健康与就绪'],
+ ['backend-api/src/preprod-boundary.ts','每请求身份与公司范围检查'],
+ ['migrations/012–014','Kelly 工单、跟进、心跳、语音 agent、公司勿扰'],
+ ['docker-compose.yml · deploy/Caddyfile','部署拓扑与反向代理'],
+];
+document.getElementById('fileRows').innerHTML=FILES.map(([a,b])=>'<tr><td class="mono">'+esc(a)+'</td><td>'+esc(b)+'</td></tr>').join('');
+const BUGS=[
+ 'production README 写「12 秒响铃超时」，但源码与提交纪录都是 20 秒（以源码为准）。',
+ 'UNKNOWN 工单永久占住名额，源码中没有释放路径；并发 1 时会让派工完全停住。',
+ '旧版 UAT 启动器 launch.py 的 --call 路径用了错误的 os.environ.get 参数（会报错）；production 不走这条路径。',
+ '「我现在没空」会被当成结束语，Kelly 直接说再见挂线；风格示例中「忙」的情境却建议提供跟进选项，两者不一致。',
+ 'charity_contract.guidance()（通话阶段提示）已写好但未接入提示词。',
+ 'worker 结束时 usage 永远是 null，用量统计页没有数据。',
+ 'OpenRouter key 是启动必填，但 Kelly 流程完全不调用。',
+ '端点 max_delay 0.8 在源码注释中标明「未经真实通话验证」。',
+];
+document.getElementById('bugList').innerHTML=BUGS.map(b=>'<li>'+esc(b)+'</li>').join('');
+})();
+</script>
+
+</html>
